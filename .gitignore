@@ -102,3 +102,6 @@ dist
 
 # TernJS port file
 .tern-port
+
+# avoid adding magic sauce
+sauce.js
