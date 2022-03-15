@@ -4,7 +4,7 @@ nodejs based implementation of HPT for controlling and tesing OpenScape DeskPhon
 ## Getting started
 Get your copy of the library from [here](https://github.com/mailsvb/hpt-js/releases/latest) or clone the repository.
 ```
-git clone https://github.com/mailsvb/hpt-js/hpt-js.git
+git clone https://github.com/mailsvb/hpt-js.git
 ```
 Integrate the library into your test cases
 
