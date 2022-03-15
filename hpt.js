@@ -1072,6 +1072,20 @@ Device.prototype.fakeHeadsetDisconnected = function() {
     });
 };
 
+Device.prototype.goToAdmin = function() {
+    const _self = this;
+    return new Promise(async resolve => {
+        if (_self.connected === true)
+        {
+            await _self._keyPress(KEYS.COMBO_ADMIN);
+            await _self.sleep(1500);
+            await _self.dial(_self.pw);
+            await _self.ok();
+        }
+        resolve();
+    });
+};
+
 module.exports = {
     Device,
     KEYS
