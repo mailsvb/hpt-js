@@ -2,13 +2,11 @@
 nodejs based implementation of HPT for controlling and tesing OpenScape DeskPhone CP devices
 
 ## Getting started
-Clone this repository and create your first test case
+Get your copy of the library from [here](https://github.com/mailsvb/hpt-js/releases/latest) or clone the repository.
 ```
 git clone https://github.com/mailsvb/hpt-js/hpt-js.git
 ```
-
-## Introduction
-After cloning the repository, you can integrate the hpt-js library into your test case
+Integrate the library into your test cases
 
 - Device: used to interact with an OpenScape DeskPhone CP devices
 - KEYS: reference to physical keys and/or LEDs
