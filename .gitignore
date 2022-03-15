@@ -105,3 +105,6 @@ dist
 
 # avoid adding magic sauce
 sauce.js
+
+# avoid adding test.js
+test.js
