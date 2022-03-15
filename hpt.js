@@ -65,10 +65,14 @@ const KEYS = {
     KEY_MENU: 24,
 
     KEY_PRESENCE: 26,
-    KEY_FORWARD: 30,
+    KEY_FORWARD: 31,
+    KEY_FEATURE: 32,
     KEY_LOUDSPEAKER: 33,
     KEY_HEADSET: 34,
     KEY_MUTE: 35,
+    KEY_MINUS: 36,
+    KEY_PLUS: 37,
+    KEY_HOLD: 39,
 
     KEY_NAVI_UP: 40,
     KEY_NAVI_DOWN: 41,
@@ -88,6 +92,7 @@ const KEYS = {
     LED_ALERT: 65,
     COMBO_RESTART: 71,
     COMBO_RESET: 73,
+    COMBO_ADMIN: 74,
 }
 
 if (SAUCE_VERSION != SAUCE_REQUIRED) {
