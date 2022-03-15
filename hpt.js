@@ -90,6 +90,7 @@ const KEYS = {
     KEY_SOFT_6: 53,
 
     LED_ALERT: 65,
+    SOCKET_HEADSET: 67,
     COMBO_RESTART: 71,
     COMBO_RESET: 73,
     COMBO_ADMIN: 74,
@@ -1042,6 +1043,30 @@ Device.prototype.factoryReset = function() {
             await _self.dial('124816');
             await _self.ok();
             _self.client.destroy();
+        }
+        resolve();
+    });
+};
+
+Device.prototype.fakeHeadsetConnected = function() {
+    const _self = this;
+    return new Promise(async resolve => {
+        if (_self.connected === true)
+        {
+            await _self._keyPress(KEYS.SOCKET_HEADSET);
+            await _self.sleep(250);
+        }
+        resolve();
+    });
+};
+
+Device.prototype.fakeHeadsetDisconnected = function() {
+    const _self = this;
+    return new Promise(async resolve => {
+        if (_self.connected === true)
+        {
+            await _self._keyRelease(KEYS.SOCKET_HEADSET);
+            await _self.sleep(250);
         }
         resolve();
     });
