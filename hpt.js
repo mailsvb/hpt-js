@@ -789,7 +789,7 @@ Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, hea
     _self.assertCallState(['established', 'retrieved'])
 }
 
-Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
     const _self = this;
     _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
@@ -812,6 +812,11 @@ Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset
                 _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
             }
 
+            if (_self.deviceType >= DEVICE_TYPE.CP400)
+            {
+                _self.assertToast(`${conf.remotePartyNumber} is now on hold`)
+            }
+
             _self.assertKeyState(KEYS.LED_ALERT, 'STEADY', 'YELLOW')
             _self.assertSelectedItem('End')
     }
@@ -820,7 +825,7 @@ Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset
 
 Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
-    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertHeldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
