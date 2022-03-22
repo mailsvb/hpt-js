@@ -511,12 +511,12 @@ const Device = function(ip, pw)
 }
 util.inherits(Device, EventEmitter);
 
-Device.prototype.init = function(initTestMode, lazyTime = 5) {
+Device.prototype.init = function(conf = { initTestMode: true, timeout: 5 }) {
     const _self = this;
-    _self.emit('log', `init() IP[${_self.ip}] E164[${_self.e164}] initTestMode[${initTestMode}] lazyTime[${lazyTime}]`);
+    _self.emit('log', `init() IP[${_self.ip}] E164[${_self.e164}] initTestMode[${conf.initTestMode}] timeout[${conf.timeout}]`);
     return new Promise(async (resolve, reject) => {
         process.stdout.write(`trying to connect to ${_self.ip}...`)
-        const failTime = Math.floor(Date.now() / 1000) + lazyTime;
+        const failTime = Math.floor(Date.now() / 1000) + conf.timeout;
         let run = true;
         do {
             await _self.establishConnection().then(() => {
@@ -542,7 +542,7 @@ Device.prototype.init = function(initTestMode, lazyTime = 5) {
             {
                 throw new Error('authorization error')
             }
-            if (initTestMode == true)
+            if (conf.initTestMode == true)
             {
                 await _self.setupInstrumentationService();
                 await _self.setupControlMode();
@@ -558,7 +558,7 @@ Device.prototype.init = function(initTestMode, lazyTime = 5) {
         }
         else
         {
-            reject(`could not connect within ${lazyTime} seconds`)
+            reject(`could not connect within ${conf.timeout} seconds`)
         }
     });
 };
