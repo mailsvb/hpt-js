@@ -114,6 +114,7 @@ const Device = function(ip, pw)
     this.deviceType = DEVICE_TYPE.NONE;
     this.deviceTypeString = '';
     this.defaultColour = '';
+    this.inputMode = '';
 
     this.clientOptions = {
         rejectUnauthorized: false
@@ -452,6 +453,31 @@ const Device = function(ip, pw)
             if (_self.deviceType < DEVICE_TYPE.CP400 && currentSubObjectName == 'OperaListBoxItem' && item.match(/string0/))
             {
                 _self.selectedItem = value.trim();
+            }
+
+            // get text input mode
+            if (_self.deviceType < DEVICE_TYPE.CP400 && value.match(/\x28[123AaBbCcHEX]{3}\x29/))
+            {
+                _self.inputMode = value.match(/\x28([123AaBbCcHEX]{3})\x29/)[1];
+            }
+            if (_self.deviceType >= DEVICE_TYPE.CP400 && value.match(/ModeNumeric|ModeCapitalised|ModeLowercase|ModeCapital/))
+            {
+                switch(value) {
+                    case 'ModeNumeric':
+                        _self.inputMode = '123';
+                        break;
+                    case 'ModeCapitalised':
+                        _self.inputMode = 'Abc';
+                        break;
+                    case 'ModeLowercase':
+                        _self.inputMode = 'abc';
+                        break;
+                    case 'ModeCapital':
+                        _self.inputMode = 'ABC';
+                        break;
+                    default:
+                        _self.inputMode = '123';
+                }
             }
         }
         _self.display = display;
