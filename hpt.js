@@ -967,20 +967,22 @@ Device.prototype.normalKeyPress = function(key) {
 
 Device.prototype.scrollUntil = function(target) {
     const _self = this;
-    _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] target[${target}]`)
+    const targets = Array.isArray(target) ? target : [target]
+    _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] targets[${JSON.stringify(targets)}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
             await _self.longKeyPress(KEYS.KEY_NAVI_UP);
             let currentSelected = lastselected = _self.selectedItem;
             do {
-                if (currentSelected.match(target)) return resolve(true);
+                if (targets.filter(elem => currentSelected.match(elem)).length > 0) return resolve(true);
                 lastSelected = currentSelected;
                 await _self.down();
                 currentSelected = _self.selectedItem;
-                _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] target[${target}]`)
-                if (lastSelected == currentSelected) {
-                    _self.emit('error', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] target[${target}]`)
+                _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] targets[${JSON.stringify(targets)}]`)
+                if (lastSelected == currentSelected)
+                {
+                    _self.emit('error', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] targets[${JSON.stringify(targets)}]`)
                     return resolve(false);
                 }
             } while(true)
