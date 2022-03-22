@@ -709,6 +709,38 @@ Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, hea
     _self.assertCallState('serviceInitiated')
 }
 
+Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: false, headset: false }) {
+    const _self = this;
+    _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    switch (_self.deviceType)
+    {
+        case DEVICE_TYPE.CP100:
+        case DEVICE_TYPE.CP110:
+            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+            break;
+        default:
+            if (conf.loudspeaker === true) {
+                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+            } else {
+                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+            }
+
+            if (conf.headset === true) {
+                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+            } else {
+                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+            }
+
+            if (_self.deviceType >= DEVICE_TYPE.CP400)
+            {
+                _self.assertToast(`${conf.remotePartyNumber} is now on hold`)
+            }
+
+            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+    }
+    _self.assertCallState('serviceInitiated')
+}
+
 Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
     const _self = this;
     _self.emit('log', `assertIncomingCall() IP[${_self.ip}] E164[${_self.e164}] headset[${conf.headset}]`)
