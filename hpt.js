@@ -709,7 +709,7 @@ Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, hea
     _self.assertCallState('serviceInitiated')
 }
 
-Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
     const _self = this;
     _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
