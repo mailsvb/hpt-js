@@ -166,7 +166,7 @@ const Device = function(ip, pw)
 
     this.handleData = function(data)
     {
-        _self.emit('log', `<<<(${data.length}): ${data}`);
+        _self.emit('messages', `<<<(${data.length}): ${data}`);
         const reqId = data.match(/unique_req_id="([^"]+)/);
         if (Array.isArray(reqId) && _self.resolve[reqId[1]])
         {
@@ -246,7 +246,7 @@ const Device = function(ip, pw)
     this.sendMessage = function(data)
     {
         _self.client.write(data);
-        _self.emit('log', `>>>(${data.length}): ${data}`);
+        _self.emit('messages', `>>>(${data.length}): ${data}`);
     }
 
     this.getTIMessage = function(data, resolve)
@@ -308,6 +308,7 @@ const Device = function(ip, pw)
 
     this.getDeviceType = function(type)
     {
+        _self.emit('log', `getDeviceType() IP[${_self.ip}] E164[${_self.e164}] type[${type}]`);
         this.deviceTypeString = type;
         if (type.match(/CP100/)) {
             return DEVICE_TYPE.CP100;
@@ -354,10 +355,12 @@ const Device = function(ip, pw)
             default:
                 _self.defaultColour = LAMPCOLOUR[0]
         }
+        _self.emit('log', `setDefaultColour() IP[${_self.ip}] E164[${_self.e164}] colour[${_self.defaultColour}]`);
     }
 
     this.shutdownStateIndication = function()
     {
+        _self.emit('log', `shutdownStateIndication() IP[${_self.ip}] E164[${_self.e164}]`);
         return new Promise(resolve => {
             const data = `${DEFS.TM_INDICATE_STATES_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_INIT_NULL}`
             _self.sendMessage(_self.getTIMessage(data, resolve));
@@ -366,6 +369,7 @@ const Device = function(ip, pw)
 
     this.setupKeepAlive = function()
     {
+        _self.emit('log', `setupKeepAlive() IP[${_self.ip}] E164[${_self.e164}]`);
         setInterval(async function() {
             await _self.sendKeepAlive();
         }, 15000);
@@ -373,6 +377,7 @@ const Device = function(ip, pw)
 
     this.sendKeepAlive = function()
     {
+        _self.emit('log', `sendKeepAlive() IP[${_self.ip}] E164[${_self.e164}]`);
         return new Promise(resolve => {
             const data = `${DEFS.TM_KEEP_ALIVE_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_NULL}`
             _self.sendMessage(_self.getTIMessage(data, resolve));
@@ -508,6 +513,7 @@ util.inherits(Device, EventEmitter);
 
 Device.prototype.init = function(initTestMode, lazyTime = 5) {
     const _self = this;
+    _self.emit('log', `init() IP[${_self.ip}] E164[${_self.e164}] initTestMode[${initTestMode}] lazyTime[${lazyTime}]`);
     return new Promise(async (resolve, reject) => {
         process.stdout.write(`trying to connect to ${_self.ip}...`)
         const failTime = Math.floor(Date.now() / 1000) + lazyTime;
@@ -522,7 +528,6 @@ Device.prototype.init = function(initTestMode, lazyTime = 5) {
                 {
                     console.log('failed')
                     run = false;
-                    reject(`could not connect within ${lazyTime} seconds`)
                 }
                 else
                 {
@@ -530,35 +535,46 @@ Device.prototype.init = function(initTestMode, lazyTime = 5) {
                 }
             });
         } while (run === true);
-        const res = await _self.sendAuthRequest();
-        if (res.match(/Accepted/) == false)
+        if (_self.connected == true)
         {
-            throw new Error('authorization error')
+            const res = await _self.sendAuthRequest();
+            if (res.match(/Accepted/) == false)
+            {
+                throw new Error('authorization error')
+            }
+            if (initTestMode == true)
+            {
+                await _self.setupInstrumentationService();
+                await _self.setupControlMode();
+                await _self.setupStateIndication();
+                await _self.setupInternalDataItems();
+                await _self.hookOff();
+                await _self.sleep(1000);
+                await _self.hookOn();
+                await _self.sleep(500);
+            }
+            _self.setupKeepAlive();
+            resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip}`);
         }
-        else if (initTestMode == true)
+        else
         {
-            await _self.setupInstrumentationService();
-            await _self.setupControlMode();
-            await _self.setupStateIndication();
-            await _self.setupInternalDataItems();
-            await _self.hookOff();
-            await _self.sleep(1000);
-            await _self.hookOn();
-            await _self.sleep(500);
+            reject(`could not connect within ${lazyTime} seconds`)
         }
-        _self.setupKeepAlive();
-        resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip}`);
     });
 };
 
 Device.prototype.setConfig = function(config) {
     const _self = this;
+    _self.emit('log', `setConfig() IP[${_self.ip}] E164[${_self.e164}] items[${Object.keys(config).length}]`);
     return new Promise(async resolve => {
-        const items = Object.keys(config)
-        for (let i = 0; i < items.length; i++)
+        if (_self.connected == true)
         {
-            await _self._setOCMS(items[i], config[items[i]]);
-            await _self.sleep(100);
+            const items = Object.keys(config)
+            for (let i = 0; i < items.length; i++)
+            {
+                await _self._setOCMS(items[i], config[items[i]]);
+                await _self.sleep(100);
+            }
         }
         resolve();
     });
@@ -566,16 +582,20 @@ Device.prototype.setConfig = function(config) {
 
 Device.prototype.getConfig = function(items) {
     const _self = this;
+    _self.emit('log', `setConfig() IP[${_self.ip}] E164[${_self.e164}] items[${items.length}]`);
     return new Promise(async resolve => {
         const config = {}
-        for (let i = 0; i < items.length; i++)
+        if (_self.connected == true)
         {
-            let res = await _self._getOCMS(items[i]);
-            const regEx = new RegExp(`name=\"${items[i]}\"(.+)document`)
-            res = regEx.exec(res)
-            Array.isArray(res) && (res = res[1].match(/itemValue\>([^<]+)/))
-            Array.isArray(res) && (config[items[i]] = res[1])
-            await _self.sleep(100);
+            for (let i = 0; i < items.length; i++)
+            {
+                let res = await _self._getOCMS(items[i]);
+                const regEx = new RegExp(`name=\"${items[i]}\"(.+)document`)
+                res = regEx.exec(res)
+                Array.isArray(res) && (res = res[1].match(/itemValue\>([^<]+)/))
+                Array.isArray(res) && (config[items[i]] = res[1])
+                await _self.sleep(100);
+            }
         }
         resolve(config);
     });
@@ -595,6 +615,7 @@ Device.prototype.assertCallState = function(state) {
     const _self = this;
     const currentState = _self.callState[_self.e164];
     const testedState = Array.isArray(state) ? state : [state]
+    _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
     for (let i = 0; i < testedState.length; i++)
     {
         if (currentState && currentState.toLowerCase() == testedState[i].toLowerCase())
@@ -602,33 +623,36 @@ Device.prototype.assertCallState = function(state) {
             return;
         }
     }
-    _self.emit('error', `assertCallState e164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
+    _self.emit('error', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
 };
 
 Device.prototype.assertSelectedItem = function(selected) {
     const _self = this;
     const currentSelected = _self.selectedItem
+    _self.emit('log', `assertSelectedItem() IP[${_self.ip}] E164[${_self.e164}] current[${currentSelected}] expected[${selected}]`)
     if (currentSelected.toLowerCase().match(selected.toLowerCase()) == false)
     {
-        _self.emit('error', `assertSelectedItem e164[${_self.e164}] current[${currentSelected}] expected[${selected}]`)
+        _self.emit('error', `assertSelectedItem() IP[${_self.ip}] E164[${_self.e164}] current[${currentSelected}] expected[${selected}]`)
     }
 };
 
 Device.prototype.assertToast = function(message) {
     const _self = this;
     const lastToast = _self.lastToast
+    _self.emit('log', `assertToast() IP[${_self.ip}] E164[${_self.e164}] current[${lastToast}] expected[${message}]`)
     if (lastToast.toLowerCase().match(message.toLowerCase()) == false)
     {
-        _self.emit('error', `assertToast e164[${_self.e164}] current[${lastToast}] expected[${message}]`)
+        _self.emit('error', `assertToast() IP[${_self.ip}] E164[${_self.e164}] current[${lastToast}] expected[${message}]`)
     }
 };
 
 Device.prototype.assertNotification = function(message) {
     const _self = this;
     const lastPopupNotification = _self.lastPopupNotification
+    _self.emit('log', `assertNotification() IP[${_self.ip}] E164[${_self.e164}] current[${lastPopupNotification}] expected[${message}]`)
     if (lastPopupNotification.toLowerCase().match(message.toLowerCase()) == false)
     {
-        _self.emit('error', `assertNotification e164[${_self.e164}] current[${lastPopupNotification}] expected[${message}]`)
+        _self.emit('error', `assertNotification() IP[${_self.ip}] E164[${_self.e164}] current[${lastPopupNotification}] expected[${message}]`)
     }
 };
 
@@ -642,14 +666,16 @@ Device.prototype.assertKeyState = function(keyId, mode, colour) {
         currentMode = LAMPMODE[ledBuf.readUInt8(2)];
         currentColour = LAMPCOLOUR[ledBuf.readUInt8(3)];
     }
+    _self.emit('log', `assertKeyState IP[${_self.ip}] E164[${_self.e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
     if (currentMode != mode || currentColour != assertedColour)
     {
-        _self.emit('error', `assertKeyState e164[${_self.e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
+        _self.emit('error', `assertKeyState() IP[${_self.ip}] E164[${_self.e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
     }
 };
 
 Device.prototype.assertIdleState = function() {
     const _self = this;
+    _self.emit('log', `assertIdleState() IP[${_self.ip}] E164[${_self.e164}]`)
     _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
@@ -658,6 +684,7 @@ Device.prototype.assertIdleState = function() {
 
 Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
+    _self.emit('log', `assertDiallingState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -684,6 +711,7 @@ Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, hea
 
 Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
     const _self = this;
+    _self.emit('log', `assertIncomingCall() IP[${_self.ip}] E164[${_self.e164}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -705,6 +733,7 @@ Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
 
 Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
+    _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -733,6 +762,7 @@ Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, head
 
 Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
+    _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -761,6 +791,7 @@ Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, hea
 
 Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
+    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -789,6 +820,7 @@ Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset
 
 Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
+    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -817,6 +849,7 @@ Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset
 
 Device.prototype.assertEndedCallIdle = function(conf = { remotePartyNumber: '' }) {
     const _self = this;
+    _self.emit('log', `assertEndedCallIdle() IP[${_self.ip}] E164[${_self.e164}] remotePartyNumber[${conf.remotePartyNumber}]`)
     _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
@@ -842,6 +875,7 @@ Device.prototype.assertDisplayText = function() {
 
 Device.prototype.sleep = function(time) {
     const _self = this;
+    _self.emit('log', `sleep() IP[${_self.ip}] E164[${_self.e164}] time[${time}]`)
     return new Promise(resolve => {
         setTimeout(() => {
             resolve();
@@ -852,6 +886,7 @@ Device.prototype.sleep = function(time) {
 Device.prototype.shutdown = function()
 {
     const _self = this;
+    _self.emit('log', `shutdown() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.client && _self.connected === true)
         {
@@ -867,6 +902,7 @@ Device.prototype.shutdown = function()
 
 Device.prototype.hookOff = function() {
     const _self = this;
+    _self.emit('log', `hookOff() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(resolve => {
         const hookData = Buffer.from([01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_OFF])
         const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
@@ -876,6 +912,7 @@ Device.prototype.hookOff = function() {
 
 Device.prototype.hookOn = function() {
     const _self = this;
+    _self.emit('log', `hookOn() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(resolve => {
         const hookData = Buffer.from([01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_ON])
         const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
@@ -885,6 +922,7 @@ Device.prototype.hookOn = function() {
 
 Device.prototype.dial = function(keys) {
     const _self = this;
+    _self.emit('log', `dial() IP[${_self.ip}] E164[${_self.e164}] keys[${keys}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -899,6 +937,7 @@ Device.prototype.dial = function(keys) {
 
 Device.prototype.longKeyPress = function(key) {
     const _self = this;
+    _self.emit('log', `longKeyPress() IP[${_self.ip}] E164[${_self.e164}] key[${key}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -913,6 +952,7 @@ Device.prototype.longKeyPress = function(key) {
 
 Device.prototype.normalKeyPress = function(key) {
     const _self = this;
+    _self.emit('log', `normalKeyPress() IP[${_self.ip}] E164[${_self.e164}] key[${key}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -927,6 +967,7 @@ Device.prototype.normalKeyPress = function(key) {
 
 Device.prototype.scrollUntil = function(target) {
     const _self = this;
+    _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] target[${target}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -937,8 +978,9 @@ Device.prototype.scrollUntil = function(target) {
                 lastSelected = currentSelected;
                 await _self.down();
                 currentSelected = _self.selectedItem;
+                _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] target[${target}]`)
                 if (lastSelected == currentSelected) {
-                    _self.emit('error', `scrollUntil currentSelected[${currentSelected}] lastselected[${lastselected}] target[${target}]`)
+                    _self.emit('error', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] target[${target}]`)
                     return resolve(false);
                 }
             } while(true)
@@ -950,6 +992,7 @@ Device.prototype.scrollUntil = function(target) {
 
 Device.prototype.ok = function() {
     const _self = this;
+    _self.emit('log', `ok() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -964,6 +1007,7 @@ Device.prototype.ok = function() {
 
 Device.prototype.up = function() {
     const _self = this;
+    _self.emit('log', `up() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -978,6 +1022,7 @@ Device.prototype.up = function() {
 
 Device.prototype.down = function() {
     const _self = this;
+    _self.emit('log', `down() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -992,6 +1037,7 @@ Device.prototype.down = function() {
 
 Device.prototype.left = function() {
     const _self = this;
+    _self.emit('log', `left() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1006,6 +1052,7 @@ Device.prototype.left = function() {
 
 Device.prototype.right = function() {
     const _self = this;
+    _self.emit('log', `right() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1020,6 +1067,7 @@ Device.prototype.right = function() {
 
 Device.prototype.restart = function() {
     const _self = this;
+    _self.emit('log', `restart() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1035,6 +1083,7 @@ Device.prototype.restart = function() {
 
 Device.prototype.factoryReset = function() {
     const _self = this;
+    _self.emit('log', `factoryReset() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1050,6 +1099,7 @@ Device.prototype.factoryReset = function() {
 
 Device.prototype.fakeHeadsetConnected = function() {
     const _self = this;
+    _self.emit('log', `fakeHeadsetConnected() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1062,6 +1112,7 @@ Device.prototype.fakeHeadsetConnected = function() {
 
 Device.prototype.fakeHeadsetDisconnected = function() {
     const _self = this;
+    _self.emit('log', `fakeHeadsetDisconnected() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
@@ -1074,6 +1125,7 @@ Device.prototype.fakeHeadsetDisconnected = function() {
 
 Device.prototype.goToAdmin = function() {
     const _self = this;
+    _self.emit('log', `goToAdmin() IP[${_self.ip}] E164[${_self.e164}]`)
     return new Promise(async resolve => {
         if (_self.connected === true)
         {
