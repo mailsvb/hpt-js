@@ -19,6 +19,65 @@ const NUMPAD = {
     '#': 11,
 }
 
+const CHAR = {
+    '61': '2',
+    '62': '22',
+    '63': '222',
+    '64': '3',
+    '65': '33',
+    '66': '333',
+    '67': '4',
+    '68': '44',
+    '69': '444',
+    '6a': '5',
+    '6b': '55',
+    '6c': '555',
+    '6d': '6',
+    '6e': '66',
+    '6f': '666',
+    '70': '7',
+    '71': '77',
+    '72': '777',
+    '73': '7777',
+    '74': '8',
+    '75': '88',
+    '76': '888',
+    '77': '9',
+    '78': '99',
+    '79': '999',
+    '7a': '9999'
+}
+
+const CHAR_SPECIAL = {
+    '20': '11',
+    '3b': '111',
+    '3d': '1111',
+    '24': '11111',
+    '5c': '111111',
+    '26': '1111111',
+    '5b': '11111111',
+    '5d': '111111111',
+    '7b': '1111111111',
+    '7d': '11111111111',
+    '25': '111111111111',
+    '2e': '*',
+    '2a': '**',
+    '23': '***',
+    '2c': '****',
+    '3f': '*****',
+    '21': '******',
+    '27': '*******',
+    '22': '********',
+    '2b': '*********',
+    '2d': '**********',
+    '28': '***********',
+    '29': '************',
+    '40': '*************',
+    '2f': '**************',
+    '3a': '***************',
+    '5f': '****************',
+}
+
 const DEVICE_TYPE = {
     NONE:   0,
     CP100:  10,
@@ -534,6 +593,34 @@ const Device = function(ip, pw)
             _self.sendMessage(_self.getOCMSMessage(GET_OCMS_DATA_MSG(item), resolve));
         });
     };
+
+    this._setInputMode = function(mode) {
+        const _self = this;
+        _self.emit('log', `setInputMode() IP[${_self.ip}] E164[${_self.e164}] mode[${mode}]`)
+        return new Promise(async resolve => {
+            if (_self.connected === true)
+            {
+                let i=0
+                do {
+                    if (_self.inputMode == mode) return resolve(true)
+                    await _self.normalKeyPress(KEYS.KEY_HASH)
+                    _self.emit('log', `setInputMode() IP[${_self.ip}] E164[${_self.e164}] inputMode[${_self.inputMode}] mode[${mode}]`)
+                    i++
+                } while(i < 6)
+            }
+            resolve();
+        });
+    };
+
+    this._isLetter = function(str) {
+        return Object.keys(CHAR).indexOf(str) >= 0
+    }
+    this._isNumber = function(str) {
+        return str.length === 1 && RegExp(/[0-9]/).test(str)
+    }
+    this._isSpecial = function(str) {
+        return Object.keys(CHAR_SPECIAL).indexOf(str) >= 0
+    }
 }
 util.inherits(Device, EventEmitter);
 
@@ -992,6 +1079,43 @@ Device.prototype.dial = function(keys) {
             for (let i = 0; i < keys.length; i++)
             {
                 await _self.normalKeyPress(NUMPAD[keys[i]]);
+            }
+        }
+        resolve();
+    });
+};
+
+Device.prototype.write = function(text) {
+    const _self = this;
+    _self.emit('log', `write() IP[${_self.ip}] E164[${_self.e164}] text[${text}]`)
+    return new Promise(async resolve => {
+        if (_self.connected === true)
+        {
+            for (let i = 0; i < text.length; i++)
+            {
+                const char_normal = text[i]
+                const char_ascii  = Buffer.from(text[i].toLowerCase(), 'utf8').toString('hex')
+                if (_self._isNumber(char_normal) === true)
+                {
+                    await _self._setInputMode('123')
+                    await _self.dial(char_normal)
+                }
+                else if (_self._isSpecial(char_ascii) === true)
+                {
+                    await _self._setInputMode('abc')
+                    await _self.dial(CHAR_SPECIAL[char_ascii])
+                }
+                else if (_self._isLetter(char_ascii) === true)
+                {
+                    if (char_normal == char_normal.toUpperCase()) {
+                        await _self._setInputMode('Abc')
+                        await _self.dial(CHAR[char_ascii])
+                    } else {
+                        await _self._setInputMode('abc')
+                        await _self.dial(CHAR[char_ascii])
+                    }
+                }
+                await _self.sleep(500)
             }
         }
         resolve();
