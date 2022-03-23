@@ -260,11 +260,20 @@ const Device = function(ip, pw)
                     const evtState = data[1].replace(REG_EX.CALL, '')
                     const evtBuf = Buffer.from(evtState, 'hex')
                     const evtType = CALLEVT[evtBuf.readUInt8(1)]
-                    const deviceId = evtBuf.toString('utf8', 3)
-                    if (_self.callState[deviceId] != evtType)
+                    let deviceId = evtBuf.toString('utf8', 3)
+                    let index = '1'
+                    const matchedIndex = deviceId.match(/@@@([0-9]+)/)
+                    if (Array.isArray(matchedIndex)) {
+                        index = matchedIndex[1];
+                        deviceId = deviceId.replace(/@@@[0-9]+/, '')
+                    }
+                    if (_self.callState[deviceId] == undefined) {
+                        _self.callState[deviceId] = {}
+                    }
+                    if (_self.callState[deviceId][index] != evtType)
                     {
-                        _self.callState[deviceId] = evtType;
-                        _self.emit('call', {device: deviceId, state: evtType});
+                        _self.callState[deviceId][index] = evtType;
+                        _self.emit('call', {device: deviceId, index: index, state: evtType});
                     }
                 }
                 else if (REG_EX.DISPLAY.test(data[1]))
@@ -728,12 +737,20 @@ Device.prototype.assertCallState = function(state) {
     const _self = this;
     const currentState = _self.callState[_self.e164];
     const testedState = Array.isArray(state) ? state : [state]
-    _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
+    _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] expected[${JSON.stringify(testedState)}]`)
     for (let i = 0; i < testedState.length; i++)
     {
-        if (currentState && currentState.toLowerCase() == testedState[i].toLowerCase())
+        if (currentState && typeof currentState == 'object')
         {
-            return;
+            const keys = Object.keys(currentState)
+            for (let j = 0; j < keys.length; j++)
+            {
+                _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] index[${keys[j]}] state[${currentState[keys[j]]}]`)
+                if (currentState[keys[j]].toLowerCase() == testedState[i].toLowerCase())
+                {
+                    return
+                }
+            }
         }
     }
     _self.emit('error', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
@@ -797,7 +814,7 @@ Device.prototype.assertIdleState = function() {
 
 Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
-    _self.emit('log', `assertDiallingState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertDiallingState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -824,7 +841,7 @@ Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, hea
 
 Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
     const _self = this;
-    _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -878,7 +895,7 @@ Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
 
 Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
-    _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -907,7 +924,7 @@ Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, head
 
 Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
-    _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -936,7 +953,7 @@ Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, hea
 
 Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
     const _self = this;
-    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
@@ -970,7 +987,7 @@ Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset
 
 Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset: false }) {
     const _self = this;
-    _self.emit('log', `assertHeldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loadspeaker}] headset[${conf.headset}]`)
+    _self.emit('log', `assertHeldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
         case DEVICE_TYPE.CP100:
