@@ -753,7 +753,7 @@ Device.prototype.assertCallState = function(state) {
             }
         }
     }
-    _self.emit('error', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${currentState}] expected[${JSON.stringify(testedState)}]`)
+    _self.emit('error', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${JSON.stringify(currentState)}] expected[${JSON.stringify(testedState)}]`)
 };
 
 Device.prototype.assertSelectedItem = function(selected) {
@@ -948,7 +948,7 @@ Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, hea
             _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
             _self.assertSelectedItem('End')
     }
-    _self.assertCallState(['established', 'retrieved'])
+    _self.assertCallState(['established', 'retrieved', 'conferenced'])
 }
 
 Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
