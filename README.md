@@ -1,5 +1,5 @@
 # hpt-js
-nodejs based implementation of HPT for controlling and tesing OpenScape DeskPhone CP devices
+nodejs based implementation of HPT for remote controlling an OpenScape DeskPhone CP device
 
 ## Getting started
 Get your copy of the library from [here](https://github.com/mailsvb/hpt-js/releases/latest) or clone the repository.
