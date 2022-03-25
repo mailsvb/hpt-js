@@ -900,7 +900,7 @@ Device.prototype.assertConsultationCallState = function(userProvided) {
 
 Device.prototype.assertIncomingCall = function(userProvided) {
     const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { headset: false });
+    const conf = _self._getConfWithDefaults(userProvided, { headset: false, remotePartyInfo: '' });
     _self.emit('log', `assertIncomingCall() IP[${_self.ip}] E164[${_self.e164}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -919,11 +919,12 @@ Device.prototype.assertIncomingCall = function(userProvided) {
             _self.assertSelectedItem('Answer')
     }
     _self.assertCallState('delivered')
+    _self.assertRemotePartyInfo(conf.remotePartyInfo);
 }
 
 Device.prototype.assertOutgoingCall = function(userProvided) {
     const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
     _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -949,11 +950,12 @@ Device.prototype.assertOutgoingCall = function(userProvided) {
             _self.assertSelectedItem('End')
     }
     _self.assertCallState('delivered')
+    _self.assertRemotePartyInfo(conf.remotePartyInfo);
 }
 
 Device.prototype.assertConnectedCall = function(userProvided) {
     const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
     _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -978,7 +980,8 @@ Device.prototype.assertConnectedCall = function(userProvided) {
             _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
             _self.assertSelectedItem('End')
     }
-    _self.assertCallState(['established', 'retrieved', 'conferenced'])
+    _self.assertCallState(['established', 'retrieved', 'conferenced']);
+    _self.assertRemotePartyInfo(conf.remotePartyInfo);
 }
 
 Device.prototype.assertHoldState = function(userProvided) {
