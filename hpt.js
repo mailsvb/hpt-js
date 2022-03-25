@@ -168,7 +168,8 @@ const Device = function(ip, pw)
     this.client = null;
     this.connected = false;
     this.selectedItem = '';
-    this.callInfo = ''
+    this.callInfo = '';
+    this.remoteNameNumber = '';
     this.e164 = '';
     this.deviceType = DEVICE_TYPE.NONE;
     this.deviceTypeString = '';
@@ -560,10 +561,13 @@ const Device = function(ip, pw)
         if (_self.display['PopupCall'] && _self.deviceType < DEVICE_TYPE.CP400)
         {
             _self.callInfo = JSON.stringify(_self.display['PopupCall'])
+            _self.remoteNameNumber = _self.display['PopupCall']['caption'] ? _self.display['PopupCall']['caption'] : ''
         }
         if (_self.display['ContactDetails'] && _self.deviceType >= DEVICE_TYPE.CP400)
         {
             _self.callInfo = JSON.stringify(_self.display['ContactDetails'])
+            _self.remoteNameNumber = _self.display['ContactDetails']['string0'] ? _self.display['ContactDetails']['string0'] : ''
+            _self.remoteNameNumber+= _self.display['ContactDetails']['string1'] ? ` ${_self.display['ContactDetails']['string1']}` : ''
         }
     }
 
@@ -803,6 +807,17 @@ Device.prototype.assertKeyState = function(keyId, mode, colour) {
     }
 };
 
+Device.prototype.assertRemotePartyInfo = function(info) {
+    const _self = this;
+    const lastNameNumber = _self.remoteNameNumber;
+    _self.emit('log', `assertRemotePartyInfo() IP[${_self.ip}] E164[${_self.e164}] lastNameNumber[${lastNameNumber}] info[${info}]`)
+    const regex = new RegExp(info);
+    if (regex.test(lastNameNumber) == false)
+    {
+        _self.emit('error', `assertRemotePartyInfo() IP[${_self.ip}] E164[${_self.e164}] lastNameNumber[${lastNameNumber}] info[${info}]`)
+    }
+};
+
 Device.prototype.assertIdleState = function() {
     const _self = this;
     _self.emit('log', `assertIdleState() IP[${_self.ip}] E164[${_self.e164}]`)
@@ -1034,11 +1049,6 @@ Device.prototype.assertEndedCallIdle = function(conf = { remotePartyNumber: '' }
             _self.assertToast(`Call with ${conf.remotePartyNumber} ended`)
     }
 }
-
-Device.prototype.assertDisplayText = function() {
-    const _self = this;
-    console.log(util.inspect(_self.display, { showHidden: true, depth: null }))
-};
 
 Device.prototype.sleep = function(time) {
     const _self = this;
