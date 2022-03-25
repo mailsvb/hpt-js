@@ -833,7 +833,6 @@ Device.prototype.assertIdleState = function() {
     _self.emit('log', `assertIdleState() IP[${_self.ip}] E164[${_self.e164}]`)
     _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertCallState('connectionCleared')
 }
 
