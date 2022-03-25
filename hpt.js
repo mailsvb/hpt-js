@@ -167,6 +167,7 @@ const Device = function(ip, pw)
     this.pw = pw;
     this.client = null;
     this.connected = false;
+    this.subscribed = false;
     this.selectedItem = '';
     this.callInfo = '';
     this.remoteNameNumber = '';
@@ -241,6 +242,11 @@ const Device = function(ip, pw)
         }
         else
         {
+            if (_self.subscribed === false)
+            {
+                _self.subscribed = true;
+                _self.emit('log', `IP[${_self.ip}] Successfully subscribed to phone events`)
+            }
             data = data.match(/<data>([^<]+)/)
             if (Array.isArray(data))
             {
@@ -690,7 +696,14 @@ Device.prototype.init = function(userProvided) {
                 await _self.sleep(500);
             }
             _self.setupKeepAlive();
-            resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip}`);
+            if (_self.subscribed === true)
+            {
+                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip}`);
+            }
+            else
+            {
+                reject(`could not connect to phone test interface. Maybe another session is still active.`)
+            }
         }
         else
         {
