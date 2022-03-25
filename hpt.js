@@ -634,11 +634,21 @@ const Device = function(ip, pw)
     this._isSpecial = function(str) {
         return Object.keys(CHAR_SPECIAL).indexOf(str) >= 0
     }
+
+    this._getConfWithDefaults = function(provided, defaults) {
+        const conf = {};
+        const keys = Object.keys(defaults);
+        for (const key in keys) {
+            conf[keys[key]] = (typeof provided === 'object' && provided[keys[key]]) ? provided[keys[key]] : defaults[keys[key]];
+        }
+        return conf;
+    }
 }
 util.inherits(Device, EventEmitter);
 
-Device.prototype.init = function(conf = { initTestMode: true, timeout: 5 }) {
+Device.prototype.init = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { initTestMode: true, timeout: 5 });
     _self.emit('log', `init() IP[${_self.ip}] E164[${_self.e164}] initTestMode[${conf.initTestMode}] timeout[${conf.timeout}]`);
     return new Promise(async (resolve, reject) => {
         process.stdout.write(`trying to connect to ${_self.ip}...`)
@@ -827,8 +837,9 @@ Device.prototype.assertIdleState = function() {
     _self.assertCallState('connectionCleared')
 }
 
-Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertDiallingState = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
     _self.emit('log', `assertDiallingState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -854,8 +865,9 @@ Device.prototype.assertDiallingState = function(conf = { loudspeaker: false, hea
     _self.assertCallState('serviceInitiated')
 }
 
-Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
+Device.prototype.assertConsultationCallState = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
     _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -886,8 +898,9 @@ Device.prototype.assertConsultationCallState = function(conf = { loudspeaker: fa
     _self.assertCallState('serviceInitiated')
 }
 
-Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
+Device.prototype.assertIncomingCall = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { headset: false });
     _self.emit('log', `assertIncomingCall() IP[${_self.ip}] E164[${_self.e164}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -908,8 +921,9 @@ Device.prototype.assertIncomingCall = function(conf = { headset: false }) {
     _self.assertCallState('delivered')
 }
 
-Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertOutgoingCall = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
     _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -937,8 +951,9 @@ Device.prototype.assertOutgoingCall = function(conf = { loudspeaker: false, head
     _self.assertCallState('delivered')
 }
 
-Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertConnectedCall = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
     _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -966,8 +981,9 @@ Device.prototype.assertConnectedCall = function(conf = { loudspeaker: false, hea
     _self.assertCallState(['established', 'retrieved', 'conferenced'])
 }
 
-Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset: false, remotePartyNumber: '' }) {
+Device.prototype.assertHoldState = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
     _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -1000,8 +1016,9 @@ Device.prototype.assertHoldState = function(conf = { loudspeaker: false, headset
     _self.assertCallState('held')
 }
 
-Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset: false }) {
+Device.prototype.assertHeldState = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
     _self.emit('log', `assertHeldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
     switch (_self.deviceType)
     {
@@ -1029,8 +1046,9 @@ Device.prototype.assertHeldState = function(conf = { loudspeaker: false, headset
     _self.assertCallState('held')
 }
 
-Device.prototype.assertEndedCallIdle = function(conf = { remotePartyNumber: '' }) {
+Device.prototype.assertEndedCallIdle = function(userProvided) {
     const _self = this;
+    const conf = _self._getConfWithDefaults(userProvided, { remotePartyNumber: '' });
     _self.emit('log', `assertEndedCallIdle() IP[${_self.ip}] E164[${_self.e164}] remotePartyNumber[${conf.remotePartyNumber}]`)
     _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
     _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
