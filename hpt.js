@@ -172,6 +172,7 @@ const Device = function(ip, pw)
     this.callInfo = '';
     this.remoteNameNumber = '';
     this.e164 = '';
+    this.softwareVersion = '';
     this.deviceType = DEVICE_TYPE.NONE;
     this.deviceTypeString = '';
     this.defaultColour = '';
@@ -374,10 +375,11 @@ const Device = function(ip, pw)
     this.setupInternalDataItems = function()
     {
         return new Promise(async resolve => {
-            const config = await _self.getConfig(['e164', 'related-device-type'])
+            const config = await _self.getConfig(['e164', 'related-device-type', 'software-version']);
             _self.e164 = config['e164'];
-            _self.deviceType = _self.getDeviceType(config['related-device-type'])
-            _self.setDefaultColour()
+            _self.softwareVersion = config['software-version'] && config['software-version'].replace(/\s{2,}/g, ' ') || 'V0 R0.0.0';
+            _self.deviceType = _self.getDeviceType(config['related-device-type']);
+            _self.setDefaultColour();
             resolve();
         });
     }
@@ -698,7 +700,7 @@ Device.prototype.init = function(userProvided) {
             _self.setupKeepAlive();
             if (_self.subscribed === true)
             {
-                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip}`);
+                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip} [${_self.softwareVersion}]`);
             }
             else
             {
