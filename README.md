@@ -10,8 +10,9 @@ Integrate the library into your test cases
 
 - Device: used to interact with an OpenScape DeskPhone CP devices
 - KEYS: reference to physical keys and/or LEDs
+- DEVICE_TYPE: reference to the configured device type
 ```
-const { Device, KEYS } = require('./hpt.js')
+const { Device, KEYS, DEVICE_TYPE } = require('./hpt.js')
 ```
 
 You also need sauce.js, which contains the message details that are exchanged between the phone and hpt-js.
