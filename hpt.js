@@ -757,6 +757,11 @@ Device.prototype.getPhoneNumber = function() {
     return _self.e164;
 };
 
+Device.prototype.getDeviceType = function() {
+    const _self = this;
+    return _self.deviceType;
+};
+
 Device.prototype.getSelectedItem = function() {
     const _self = this;
     return _self.selectedItem;
@@ -1391,5 +1396,6 @@ Device.prototype.goToAdmin = function() {
 
 module.exports = {
     Device,
-    KEYS
+    KEYS,
+    DEVICE_TYPE
 };
