@@ -1,8 +1,20 @@
 const tls = require('tls');
 const util = require('util');
 const EventEmitter = require('events').EventEmitter;
-const { SAUCE_VERSION, DEFS, REG_EX, LAMPMODE, LAMPCOLOUR, CALLEVT, GET_AUTH_REQUEST_MSG, GET_TI_MSG_CONTENT, GET_OCMS_MSG_CONTENT, SET_OCMS_DATA_MSG, GET_OCMS_DATA_MSG } = require('./sauce.js')
-const SAUCE_REQUIRED = 1;
+const SAUCE_REQUIRED = 2;
+const { SAUCE_VERSION,
+        DEFS,
+        REG_EX,
+        LAMPMODE,
+        LAMPCOLOUR,
+        CALLEVT,
+        CODECS,
+        TONES,
+        GET_AUTH_REQUEST_MSG,
+        GET_TI_MSG_CONTENT,
+        GET_OCMS_MSG_CONTENT,
+        SET_OCMS_DATA_MSG,
+        GET_OCMS_DATA_MSG } = require(`./sauce_v${SAUCE_REQUIRED}.js`)
 
 const NUMPAD = {
     0: 0,
@@ -98,6 +110,11 @@ const KEY_EVENTS = {
     4: 'EVT_KEY_LONGPUSH'
 }
 
+const TONE_STATE = {
+    0: 'OFF',
+    1: 'ON',
+}
+
 const KEYS = {
     EVT_HOOK_OFF: 0,
     EVT_HOOK_ON: 1,
@@ -189,6 +206,7 @@ const Device = function(ip, pw)
     this.lastPopupNotification = '';
     this.callState = {};
     this.lampState = {};
+    this.toneState = {};
     this.resolve = {};
     this.auth = false;
     this.reqId = 0;
@@ -314,6 +332,18 @@ const Device = function(ip, pw)
                     if (KEY_EVENTS[evt])
                     {
                         _self.emit('key', {key: key, event: KEY_EVENTS[evt]});
+                    }
+                }
+                else if (REG_EX.TONE.test(data[1]))
+                {
+                    const toneData = data[1].replace(REG_EX.TONE, '')
+                    const toneBuf = Buffer.from(toneData, 'hex')
+                    const tone = parseInt(toneBuf.toString('hex', 0, 1), 16);
+                    const state = parseInt(toneBuf.toString('hex', 1, 2), 16);
+                    if (TONES[tone] && _self.toneState[tone] != state)
+                    {
+                        _self.toneState[tone] = state;
+                        _self.emit('tone', {tone: TONES[tone], state: TONE_STATE[state]});
                     }
                 }
             }
@@ -650,6 +680,13 @@ const Device = function(ip, pw)
             conf[keys[key]] = (typeof provided === 'object' && provided[keys[key]]) ? provided[keys[key]] : defaults[keys[key]];
         }
         return conf;
+    }
+
+    this._sendGetCodecRequest = function() {
+        return new Promise(resolve => {
+            const data = `${DEFS.TM_CODEC_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_INIT_NULL}`
+            _self.sendMessage(_self.getTIMessage(data, resolve));
+        });
     }
 }
 util.inherits(Device, EventEmitter);
@@ -1393,6 +1430,25 @@ Device.prototype.goToAdmin = function() {
         resolve();
     });
 };
+
+Device.prototype.getCodec = function() {
+    const _self = this;
+    _self.emit('log', `getCodec() IP[${_self.ip}] E164[${_self.e164}]`);
+    return new Promise(async resolve => {
+        const res = await _self._sendGetCodecRequest();
+        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+        let txCodec = 'Unknown';
+        if (data && REG_EX.CODEC.test(data))
+        {
+            const codec = data.replace(REG_EX.CODEC, '');
+            if (Object.keys(CODECS).indexOf(codec) >= 0)
+            {
+                txCodec = CODECS[codec];
+            }
+        }
+        resolve(txCodec);
+    });
+}
 
 module.exports = {
     Device,
