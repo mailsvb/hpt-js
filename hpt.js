@@ -786,6 +786,75 @@ const Device = function(ip, pw)
             _self.sendMessage(_self.getTIMessage(data, resolve));
         });
     }
+
+    this._startSpeechTestTransmit = function() {
+        _self.emit('log', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
+        return new Promise(async resolve => {
+            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_START, 0, 0);
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_START}`);
+            if (regEx.test(data) === false) {
+                _self.emit('error', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+            }
+            resolve();
+        });
+    }
+
+    this._stopSpeechTestTransmit = function() {
+        _self.emit('log', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
+        return new Promise(async resolve => {
+            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_STOP, 0, 0);
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_STOP}`);
+            if (regEx.test(data) === false) {
+                _self.emit('error', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+            }
+            resolve();
+        });
+    }
+
+    this._startSpeechTestReceive = function() {
+        _self.emit('log', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
+        return new Promise(async resolve => {
+            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_START, speechTestLength, 0);
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_START}`);
+            if (regEx.test(data) === false) {
+                _self.emit('error', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+            }
+            resolve();
+        });
+    }
+
+    this._stopSpeechTestReceive = function() {
+        _self.emit('log', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
+        return new Promise(async resolve => {
+            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_STOP, 0, 0);
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_STOP}`);
+            if (regEx.test(data) === false) {
+                _self.emit('error', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+            }
+            resolve();
+        });
+    }
+
+    this._getSpeechTestResults = function() {
+        _self.emit('log', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}]`);
+        return new Promise(async resolve => {
+            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RESULT, 0, 0);
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            const resultBuffer = Buffer.from(data, 'hex');
+            const content = resultBuffer.toString('utf8', 10);
+            try {
+                _self.speechPathTestResult = JSON.parse(content);
+                _self.speechPathTestResult.codec = await _self.getCodec();
+            } catch(e) {
+                _self.emit('error', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}] error[${e.message}] content[${content}]`);
+            }
+            resolve(_self.speechPathTestResult);
+        });
+    }
 }
 util.inherits(Device, EventEmitter);
 
@@ -885,6 +954,11 @@ Device.prototype.getConfig = function(items) {
         }
         resolve(config);
     });
+};
+
+Device.prototype.getSpeechPathTestResults = function() {
+    const _self = this;
+    return _self.speechPathTestResult;
 };
 
 Device.prototype.getPhoneNumber = function() {
@@ -1548,91 +1622,27 @@ Device.prototype.getCodec = function() {
     });
 }
 
-Device.prototype.startSpeechTestTransmit = function() {
+Device.prototype.testSpeechPathTo = function(userProvided) {
     const _self = this;
-    _self.emit('log', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
+    const conf = _self._getConfWithDefaults(userProvided, { otherDevice: null, length: 5000, minQuality: 3 });
+    if (conf.otherDevice === null || conf.otherDevice instanceof Device === false)
+    {
+        _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice must be provided`)
+        return;
+    }
+    _self.emit('log', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice[${conf.otherDevice.getPhoneNumber()}]`);
     return new Promise(async resolve => {
-        const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_START, 0, 0);
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_START}`);
-        if (regEx.test(data) === false) {
-            _self.emit('error', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+        await _self._startSpeechTestTransmit();
+        await conf.otherDevice._startSpeechTestReceive();
+        await _self.sleep(conf.length);
+        await conf.otherDevice._stopSpeechTestReceive();
+        await _self._stopSpeechTestTransmit();
+        const result = await conf.otherDevice._getSpeechTestResults();
+        if (result.VQT < conf.minQuality)
+        {
+            _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] minQuality[${conf.minQuality}] VQT[${result.VQT}]`);
         }
         resolve();
-    });
-}
-
-Device.prototype.stopSpeechTestTransmit = function() {
-    const _self = this;
-    _self.emit('log', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
-    return new Promise(async resolve => {
-        const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_STOP, 0, 0);
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_STOP}`);
-        if (regEx.test(data) === false) {
-            _self.emit('error', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
-        }
-        resolve();
-    });
-}
-
-Device.prototype.startSpeechTestReceive = function() {
-    const _self = this;
-    _self.emit('log', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
-    return new Promise(async resolve => {
-        const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_START, speechTestLength, 0);
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_START}`);
-        if (regEx.test(data) === false) {
-            _self.emit('error', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
-        }
-        resolve();
-    });
-}
-
-Device.prototype.stopSpeechTestReceive = function() {
-    const _self = this;
-    _self.emit('log', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
-    return new Promise(async resolve => {
-        const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_STOP, 0, 0);
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_STOP}`);
-        if (regEx.test(data) === false) {
-            _self.emit('error', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
-        }
-        resolve();
-    });
-}
-
-Device.prototype.getSpeechTestResults = function() {
-    const _self = this;
-    _self.emit('log', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}]`);
-    return new Promise(async resolve => {
-        const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RESULT, 0, 0);
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        const resultBuffer = Buffer.from(data, 'hex');
-        const content = resultBuffer.toString('utf8', 10);
-        try {
-            _self.speechPathTestResult = JSON.parse(content);
-            _self.speechPathTestResult.codec = await _self.getCodec();
-        } catch(e) {
-            _self.emit('error', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}] error[${e.message}] content[${content}]`);
-        }
-        resolve(_self.speechPathTestResult);
-    });
-}
-
-Device.prototype.testSpeechPathTo = function(otherDevice) {
-    const _self = this;
-    _self.emit('log', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice[${otherDevice.getPhoneNumber()}]`);
-    return new Promise(async resolve => {
-        await _self.startSpeechTestTransmit();
-        await _self.sleep(500);
-        await otherDevice.startSpeechTestReceive();
-        await _self.sleep(speechTestLength);
-        await otherDevice.stopSpeechTestReceive();
-        await _self.stopSpeechTestTransmit();
-        resolve(await otherDevice.getSpeechTestResults());
     });
 }
 
