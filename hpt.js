@@ -204,6 +204,9 @@ const Device = function(ip, pw)
     this.display = {};
     this.displayString = '';
     this.tmpDisplayString = '';
+    this.kmDisplay = {};
+    this.kmString = '';
+    this.tmpKmString = '';
     this.lastToast = '';
     this.lastPopupNotification = '';
     this.callState = {};
@@ -307,21 +310,21 @@ const Device = function(ip, pw)
                 }
                 else if (REG_EX.DISPLAY.test(data[1]))
                 {
-                    const displayState = data[1].replace(REG_EX.DISPLAY, '')
-                    const displayBuf = Buffer.from(displayState, 'hex')
-                    const current = parseInt(displayBuf.toString('hex', 2, 4))
-                    const total = parseInt(displayBuf.toString('hex', 4, 6))
-                    const content = displayBuf.toString('hex', 6)
+                    const displayState = data[1].replace(REG_EX.DISPLAY, '');
+                    const displayBuf = Buffer.from(displayState, 'hex');
+                    const current = parseInt(displayBuf.toString('hex', 2, 4));
+                    const total = parseInt(displayBuf.toString('hex', 4, 6));
+                    const content = displayBuf.toString('hex', 6);
+                    current === 1 && (_self.tmpDisplayString = '');
                     if (current <= total) {
                         _self.tmpDisplayString += content;
                     }
                     if (current == total) {
-                        const serializedDisplay = Buffer.from(_self.tmpDisplayString, 'hex').toString()
+                        const serializedDisplay = Buffer.from(_self.tmpDisplayString, 'hex').toString();
                         if (_self.tmpDisplayString != _self.displayString)
                         {
                             _self.displayString = _self.tmpDisplayString;
-                            _self.tmpDisplayString = '';
-                            _self.parseDisplayData(serializedDisplay)
+                            _self.parseDisplayData(serializedDisplay);
                             _self.emit('display', _self.display);
                         }
                     }
@@ -347,6 +350,27 @@ const Device = function(ip, pw)
                     {
                         _self.toneState[tone] = state;
                         _self.emit('tone', {tone: TONES[tone], state: TONE_STATE[state]});
+                    }
+                }
+                else if (REG_EX.KM.test(data[1]))
+                {
+                    const kmState = data[1].replace(REG_EX.KM, '');
+                    const kmBuf = Buffer.from(kmState, 'hex');
+                    const current = parseInt(kmBuf.toString('hex', 2, 4));
+                    const total = parseInt(kmBuf.toString('hex', 4, 6));
+                    const content = kmBuf.toString('hex', 6);
+                    current === 1 && (_self.tmpKmString = '');
+                    if (current <= total) {
+                        _self.tmpKmString += content;
+                    }
+                    if (current == total) {
+                        const serializedDisplay = Buffer.from(_self.tmpKmString, 'hex').toString();
+                        if (_self.tmpKmString != _self.kmString)
+                        {
+                            _self.kmString = _self.tmpKmString;
+                            _self.parseKmData(serializedDisplay);
+                            _self.emit('km', _self.kmDisplay);
+                        }
                     }
                 }
             }
@@ -504,7 +528,6 @@ const Device = function(ip, pw)
         let currentSubObject = {}
         let currentObjectName = '';
         let currentSubObjectName = '';
-        let newSubitem = false;
         for(let i=0; i < lines.length; i++) {
             const line = lines[i].split(/:(.*)/)
             const item = line[0].trim()
@@ -610,6 +633,64 @@ const Device = function(ip, pw)
             _self.remoteNameNumber = _self.display['ContactDetails']['string0'] ? _self.display['ContactDetails']['string0'] : ''
             _self.remoteNameNumber+= _self.display['ContactDetails']['string1'] ? ` ${_self.display['ContactDetails']['string1']}` : ''
         }
+    }
+
+    this.parseKmData = function(data)
+    {
+        const lines = data.split(/[\r\n]{1,2}/).filter(elem => elem.trim().length > 0);
+        const kmDisplay = {}
+        let handleObject = false;
+        let handleSubItem = false;
+        let currentSubObject = {};
+        let kmId = '';
+        let rowId = '';
+        for(let i=0; i < lines.length; i++) {
+            const line = lines[i].split(/:(.*)/)
+            const item = line[0].trim()
+            const value = line[1].trim()
+            if (item == 'object') {
+                handleObject = true;
+                continue;
+            }
+            if (item == 'subitem') {
+                handleObject = false;
+                handleSubItem = true;
+                currentSubObject = {};
+                continue;
+            }
+            if (item == 'index' && handleObject == true)
+            {
+                kmId = value;
+                kmDisplay[kmId] = { rows: {}};
+                continue;
+            }
+            if (item == 'row' && handleSubItem == true)
+            {
+                rowId = value;
+                continue;
+            }
+            if (item == 'endsubitem')
+            {
+                handleSubItem = false;
+                kmDisplay[kmId]['rows'][rowId] = currentSubObject;
+                continue;
+            }
+            if (item == 'end')
+            {
+                handleObject = false;
+                continue;
+            }
+
+            if (handleObject == true && item != 'name')
+            {
+                kmDisplay[kmId][item] = value;
+            }
+            if (handleSubItem == true && item != 'name')
+            {
+                currentSubObject[item] = value;
+            }
+        }
+        _self.kmDisplay = kmDisplay;
     }
 
     /***
