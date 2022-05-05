@@ -186,6 +186,7 @@ const Device = function(ip, pw)
     this.pw = pw;
     this.client = null;
     this.connected = false;
+    this.fullAccess = false;
     this.subscribed = false;
     this.selectedItem = '';
     this.callInfo = '';
@@ -342,6 +343,7 @@ const Device = function(ip, pw)
                 }
                 else if (REG_EX.TONE.test(data[1]))
                 {
+                    _self.fullAccess = true;
                     const toneData = data[1].replace(REG_EX.TONE, '')
                     const toneBuf = Buffer.from(toneData, 'hex')
                     const tone = parseInt(toneBuf.toString('hex', 0, 1), 16);
@@ -904,7 +906,7 @@ Device.prototype.init = function(userProvided) {
             _self.setupKeepAlive();
             if (_self.subscribed === true)
             {
-                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip} [${_self.softwareVersion}]`);
+                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip} [${_self.softwareVersion}] DONGLE[${_self.fullAccess}]`);
             }
             else
             {
@@ -1628,6 +1630,11 @@ Device.prototype.testSpeechPathTo = function(userProvided) {
     if (conf.otherDevice === null || conf.otherDevice instanceof Device === false)
     {
         _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice must be provided`)
+        return;
+    }
+    if (_self.fullAccess === false)
+    {
+        _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] dongle must be installed to run speech path test`)
         return;
     }
     _self.emit('log', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice[${conf.otherDevice.getPhoneNumber()}]`);
