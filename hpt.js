@@ -312,8 +312,8 @@ const Device = function(ip, pw)
                 {
                     const displayState = data[1].replace(REG_EX.DISPLAY, '');
                     const displayBuf = Buffer.from(displayState, 'hex');
-                    const current = parseInt(displayBuf.toString('hex', 2, 4));
-                    const total = parseInt(displayBuf.toString('hex', 4, 6));
+                    const current = parseInt(displayBuf.toString('hex', 2, 4), 16);
+                    const total = parseInt(displayBuf.toString('hex', 4, 6), 16);
                     const content = displayBuf.toString('hex', 6);
                     current === 1 && (_self.tmpDisplayString = '');
                     if (current <= total) {
@@ -356,8 +356,8 @@ const Device = function(ip, pw)
                 {
                     const kmState = data[1].replace(REG_EX.KM, '');
                     const kmBuf = Buffer.from(kmState, 'hex');
-                    const current = parseInt(kmBuf.toString('hex', 2, 4));
-                    const total = parseInt(kmBuf.toString('hex', 4, 6));
+                    const current = parseInt(kmBuf.toString('hex', 2, 4), 16);
+                    const total = parseInt(kmBuf.toString('hex', 4, 6), 16);
                     const content = kmBuf.toString('hex', 6);
                     current === 1 && (_self.tmpKmString = '');
                     if (current <= total) {
