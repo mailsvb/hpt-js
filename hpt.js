@@ -1,6 +1,6 @@
-const tls = require('tls');
-const util = require('util');
-const EventEmitter = require('events').EventEmitter;
+const { connect } = require('node:tls');
+const util = require('node:util');
+const { EventEmitter } = require('node:events');
 const SAUCE_REQUIRED = 2;
 const { SAUCE_VERSION,
         DEFS,
@@ -185,6 +185,8 @@ const Device = function(ip, pw)
     this.ip = ip;
     this.pw = pw;
     this.client = null;
+    this.localAddress = '';
+    this.localPort = '';
     this.connected = false;
     this.fullAccess = false;
     this.subscribed = false;
@@ -226,9 +228,11 @@ const Device = function(ip, pw)
 
     this.establishConnection = function() {
         return new Promise((resolve, reject) => {
-            _self.client = tls.connect(65532, _self.ip, _self.clientOptions, function()
+            _self.client = connect(65532, _self.ip, _self.clientOptions, function()
             {
                 _self.connected = true;
+                _self.localAddress = _self.client.localAddress;
+                _self.localPort = _self.client.localPort;
                 resolve();
             });
             _self.client.setTimeout(5000, () => {
