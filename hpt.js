@@ -1,6 +1,5 @@
 const { connect } = require('node:tls');
-const util = require('node:util');
-const { EventEmitter } = require('node:events');
+const EventEmitter = require('node:events');
 const SAUCE_REQUIRED = 2;
 const { SAUCE_VERSION,
         DEFS,
@@ -179,103 +178,227 @@ if (SAUCE_VERSION != SAUCE_REQUIRED) {
     process.exit()
 }
 
-const Device = function(ip, pw)
-{
-    const _self = this;
-    this.ip = ip;
-    this.pw = pw;
-    this.client = null;
-    this.localAddress = '';
-    this.localPort = '';
-    this.connected = false;
-    this.fullAccess = false;
-    this.subscribed = false;
-    this.selectedItem = '';
-    this.callInfo = '';
-    this.remoteNameNumber = '';
-    this.e164 = '';
-    this.softwareVersion = '';
-    this.deviceType = DEVICE_TYPE.NONE;
-    this.deviceTypeString = '';
-    this.defaultColour = '';
-    this.inputMode = '';
+/**
+ * Device class.
+ * @extends EventEmitter
+ */
+class Device extends EventEmitter {
+    /** @property {string} - The IP address provided. */
+    #ip;
+    /** @property {string} - The admin password provided. */
+    #pw;
+    /** @property {object} - The TLS connection instance. */
+    #client;
+    /** @property {object} - The TLS connection options object. */
+    #clientOptions;
+    /** @property {string} - The local address used to connect to the device. */
+    #localAddress;
+    /** @property {string} - The local port used to connect to the device. */
+    #localPort;
+    /** @property {boolean} - The connected state of the Device instance. */
+    #connected;
+    /** @property {boolean} - The dongle state of the Device instance for advanced operation. */
+    #fullAccess;
+    /** @property {boolean} - The subscription state of the Device instance for receiving events. */
+    #subscribed;
+    /** @property {number} - The request ID sent in the XML messages to the device. */
+    #reqId;
+    /** @property {object} - The object containing the promises per request ID to be resolved. */
+    #resolver;
 
-    this.clientOptions = {
-        rejectUnauthorized: false
-    };
+    /** @property {string} - The main E164 number of the device connected. */
+    #e164;
+    /** @property {string} - The software version of the connected device. */
+    #softwareVersion;
+    /** @property {string} - The last toast notification displayed on the device. */
+    #lastToastNotification;
+    /** @property {string} - The last popup notification displayed on the device. */
+    #lastPopupNotification;
+    /** @property {string} - The splitted key module data received as string. */
+    #kmStringSplitted;
+    /** @property {string} - The complete key module data received as string. */
+    #kmStringComplete;
+    /** @property {object} - The parsed key module data as object. */
+    #kmDisplay;
+    /** @property {string} - The splitted display data received as string. */
+    #displayStringSplitted;
+    /** @property {string} - The complete display data received as string. */
+    #displayStringComplete;
+    /** @property {object} - The parsed display data as object. */
+    #display;
+    /** @property {string} - The input mode of the device. */
+    #inputMode;
+    /** @property {string} - The default colour of the device. */
+    #defaultColour
+    /** @property {number} - The type of the connected device. */
+    #deviceType
+    /** @property {string} - The type of the connected device as string. */
+    #deviceTypeString
+    /** @property {string} - The complete remote call info of the connected device. */
+    #remoteCallInfo
+    /** @property {string} - The remote name/number of the connected device. */
+    #remoteNameNumber
+    /** @property {string} - The current selected item on the device. */
+    #selectedItem
 
-    this.display = {};
-    this.displayString = '';
-    this.tmpDisplayString = '';
-    this.kmDisplay = {};
-    this.kmString = '';
-    this.tmpKmString = '';
-    this.lastToast = '';
-    this.lastPopupNotification = '';
-    this.callState = {};
-    this.lampState = {};
-    this.toneState = {};
-    this.resolve = {};
-    this.speechPathTestResult = {};
-    this.auth = false;
-    this.reqId = 0;
+    /** @property {object} - The tone states object. */
+    #toneState
+    /** @property {object} - The lamp states object. */
+    #lampState
+    /** @property {object} - The call states object. */
+    #callState
+    /** @property {object} - The speech path test result object. */
+    #speechPathTestResult
 
-    this._getReqId = function()
-    {
-        _self.reqId++;
-        return _self.reqId.toString();
+    /**
+     * Create a new instance of Device
+     * @param {string} ip - The IP address of the device.
+     * @param {string} pw - The admin password of the device.
+     */
+    constructor (ip, pw) {
+        super();
+        this.#ip = ip;
+        this.#pw = pw;
+        this.#selectedItem = '';
+        this.#remoteCallInfo = '';
+        this.#remoteNameNumber = '';
+        this.#deviceType = DEVICE_TYPE.NONE;
+        this.#deviceTypeString = '';
+        this.#defaultColour = '';
+        this.#inputMode = '';
+        this.#display = {};
+        this.#displayStringComplete = '';
+        this.#displayStringSplitted = '';
+        this.#kmDisplay = {};
+        this.#kmStringSplitted = '';
+        this.#kmStringComplete = '';
+        this.#lastToastNotification = '';
+        this.#lastPopupNotification = '';
+        this.#callState = {};
+        this.#lampState = {};
+        this.#toneState = {};
+        this.#speechPathTestResult = {};
+
+        this.#fullAccess = false;
+        this.#reqId = 0;
+        this.#resolver = {};
+        this.#clientOptions = { rejectUnauthorized: false };
+        // generic exception handling that emits an error to correctly clear the connection with the device
+        process.on('uncaughtException', err => this.emit('error', `uncaught exception ip[${this.#ip}] e164[${this.#e164}] msg[${err && err.message}]`));
     }
 
-    this.establishConnection = function() {
-        return new Promise((resolve, reject) => {
-            _self.client = connect(65532, _self.ip, _self.clientOptions, function()
+    #getReqId () {
+        this.#reqId++;
+        return this.#reqId.toString();
+    }
+
+    /**
+     * Initialize the connection to the device via HPT port.
+     * @param {object} opts - The options provided by the caller.
+     * @returns {Promise}
+     */
+    init (opts) {
+        const conf = this.#getConfWithDefaults(opts, { initTestMode: true, timeout: 5 });
+        this.emit('log', `init() IP[${this.#ip}] E164[${this.#e164}] initTestMode[${conf.initTestMode}] timeout[${conf.timeout}]`);
+        return new Promise(async (resolve, reject) => {
+            process.stdout.write(`trying to connect to ${this.#ip}...`)
+            const failTime = Math.floor(Date.now() / 1000) + conf.timeout;
+            let run = true;
+            do {
+                await this.#establishConnection().then(() => {
+                    run = false;
+                })
+                .catch((err) => {
+                    const now = Math.floor(Date.now() / 1000);
+                    if (now >= failTime)
+                    {
+                        console.log('failed')
+                        run = false;
+                    }
+                    else
+                    {
+                        process.stdout.write('.');
+                    }
+                });
+            } while (run === true);
+            if (this.#connected === true)
             {
-                _self.connected = true;
-                _self.localAddress = _self.client.localAddress;
-                _self.localPort = _self.client.localPort;
+                const res = await this.#sendAuthRequest();
+                if (res.match(/Accepted/) == false)
+                {
+                    throw new Error('authorization error')
+                }
+                if (conf.initTestMode == true)
+                {
+                    await this.#setupInstrumentationService();
+                    await this.#setupControlMode();
+                    await this.#setupStateIndication();
+                    await this.#setupInternalDataItems();
+                    await this.hookOff();
+                    await this.sleep(1000);
+                    await this.hookOn();
+                    await this.sleep(500);
+                }
+                this.#setupKeepAlive();
+                if (this.#subscribed === true) {
+                    resolve(`success. ${this.#deviceTypeString} ${this.#e164}@${this.#ip} [${this.#softwareVersion}] DONGLE[${this.#fullAccess}]`);
+                } else {
+                    reject(`could not connect to phone test interface. Maybe another session is still active.`)
+                }
+            } else {
+                reject(`could not connect within ${conf.timeout} seconds`)
+            }
+        });
+    };
+
+    #establishConnection () {
+        return new Promise((resolve, reject) => {
+            this.#client = connect(65532, this.#ip, this.#clientOptions, () => {
+                this.#connected = true;
+                this.#localAddress = this.#client.localAddress;
+                this.#localPort = this.#client.localPort;
                 resolve();
             });
-            _self.client.setTimeout(5000, () => {
-                if (_self.client.connecting === true)
+            this.#client.setTimeout(5000, () => {
+                if (this.#client.connecting === true)
                 {
-                    _self.client.removeAllListeners();
-                    _self.client.destroy();
+                    this.#client.removeAllListeners();
+                    this.#client.destroy();
                     reject(`failed to connect`);
                 }
             })
-            _self.client.on('data', (data) => {
+            this.#client.on('data', (data) => {
                 data = data.toString();
                 const allMessages = data.split('<opera_message').filter(elem => elem.trim().length > 0);
                 allMessages.forEach(message => {
-                    _self.handleData(`<opera_message${message}`.trim());
+                    this.#handleData(`<opera_message${message}`.trim());
                 })
             });
-            _self.client.on('end', () => console.log('ended'));
-            _self.client.on('error', (e) => console.error(e.message));
-            _self.client.on('disconnect', () => console.log('disconnected'));
+            this.#client.on('end', () => console.log('ended'));
+            this.#client.on('error', (e) => console.error(e.message));
+            this.#client.on('disconnect', () => console.log('disconnected'));
         });
     }
 
-    this.handleData = function(data)
-    {
-        _self.emit('messages', `<<<(${data.length}): ${data}`);
+    #handleData (data) {
+        this.emit('messages', `<<<(${data.length}): ${data}`);
         const reqId = data.match(/unique_req_id="([^"]+)/);
-        if (Array.isArray(reqId) && _self.resolve[reqId[1]])
+        if (Array.isArray(reqId) && this.#resolver[reqId[1]])
         {
-            _self.resolve[reqId[1]](data);
-            delete _self.resolve[reqId[1]];
+            this.#resolver[reqId[1]](data);
+            delete this.#resolver[reqId[1]];
         }
-        else if (_self.resolve[0])
+        else if (this.#resolver[0])
         {
-            _self.resolve['0'](data);
-            delete _self.resolve['0'];
+            this.#resolver['0'](data);
+            delete this.#resolver['0'];
         }
         else
         {
-            if (_self.subscribed === false)
+            if (this.#subscribed !== true)
             {
-                _self.subscribed = true;
-                _self.emit('log', `IP[${_self.ip}] Successfully subscribed to phone events`)
+                this.#subscribed = true;
+                this.emit('log', `IP[${this.#ip}] Successfully subscribed to phone events`)
             }
             data = data.match(/<data>([^<]+)/)
             if (Array.isArray(data))
@@ -286,10 +409,10 @@ const Device = function(ip, pw)
                     const ledState = data[1].replace(REG_EX.LED, '')
                     const ledBuf = Buffer.from(ledState, 'hex')
                     const keyId = ((ledBuf.readUInt8(0) - 1) * 256) + ledBuf.readUInt8(1);
-                    if (_self.lampState[keyId] != ledState)
+                    if (this.#lampState[keyId] != ledState)
                     {
-                        _self.lampState[keyId] = ledState;
-                        _self.emit('led', {key: keyId, mode: LAMPMODE[ledBuf.readUInt8(2)], colour: LAMPCOLOUR[ledBuf.readUInt8(3)]});
+                        this.#lampState[keyId] = ledState;
+                        this.emit('led', {key: keyId, mode: LAMPMODE[ledBuf.readUInt8(2)], colour: LAMPCOLOUR[ledBuf.readUInt8(3)]});
                     }
                 }
                 else if (REG_EX.CALL.test(data[1]))
@@ -304,13 +427,13 @@ const Device = function(ip, pw)
                         index = matchedIndex[1];
                         deviceId = deviceId.replace(/@@@[0-9]+/, '')
                     }
-                    if (_self.callState[deviceId] == undefined) {
-                        _self.callState[deviceId] = {}
+                    if (this.#callState[deviceId] == undefined) {
+                        this.#callState[deviceId] = {}
                     }
-                    if (_self.callState[deviceId][index] != evtType)
+                    if (this.#callState[deviceId][index] != evtType)
                     {
-                        _self.callState[deviceId][index] = evtType;
-                        _self.emit('call', {device: deviceId, index: index, state: evtType});
+                        this.#callState[deviceId][index] = evtType;
+                        this.emit('call', {device: deviceId, index: index, state: evtType});
                     }
                 }
                 else if (REG_EX.DISPLAY.test(data[1]))
@@ -320,17 +443,19 @@ const Device = function(ip, pw)
                     const current = parseInt(displayBuf.toString('hex', 2, 4), 16);
                     const total = parseInt(displayBuf.toString('hex', 4, 6), 16);
                     const content = displayBuf.toString('hex', 6);
-                    current === 1 && (_self.tmpDisplayString = '');
-                    if (current <= total) {
-                        _self.tmpDisplayString += content;
+                    if (current === 1) {
+                        this.#displayStringSplitted = '';
                     }
-                    if (current == total) {
-                        const serializedDisplay = Buffer.from(_self.tmpDisplayString, 'hex').toString();
-                        if (_self.tmpDisplayString != _self.displayString)
+                    if (current <= total) {
+                        this.#displayStringSplitted += content;
+                    }
+                    if (current === total) {
+                        const serializedDisplay = Buffer.from(this.#displayStringSplitted, 'hex').toString();
+                        if (this.#displayStringSplitted != this.#displayStringComplete)
                         {
-                            _self.displayString = _self.tmpDisplayString;
-                            _self.parseDisplayData(serializedDisplay);
-                            _self.emit('display', _self.display);
+                            this.#displayStringComplete = this.#displayStringSplitted;
+                            this.#parseDisplayData(serializedDisplay);
+                            this.emit('display', this.#display);
                         }
                     }
                 }
@@ -342,20 +467,20 @@ const Device = function(ip, pw)
                     const evt = parseInt(keyBuf.toString('hex', 2, 3), 16);
                     if (KEY_EVENTS[evt])
                     {
-                        _self.emit('key', {key: key, event: KEY_EVENTS[evt]});
+                        this.emit('key', {key: key, event: KEY_EVENTS[evt]});
                     }
                 }
                 else if (REG_EX.TONE.test(data[1]))
                 {
-                    _self.fullAccess = true;
+                    this.#fullAccess = true;
                     const toneData = data[1].replace(REG_EX.TONE, '')
                     const toneBuf = Buffer.from(toneData, 'hex')
                     const tone = parseInt(toneBuf.toString('hex', 0, 1), 16);
                     const state = parseInt(toneBuf.toString('hex', 1, 2), 16);
-                    if (TONES[tone] && _self.toneState[tone] != state)
+                    if (TONES[tone] && this.#toneState[tone] != state)
                     {
-                        _self.toneState[tone] = state;
-                        _self.emit('tone', {tone: TONES[tone], state: TONE_STATE[state]});
+                        this.#toneState[tone] = state;
+                        this.emit('tone', {tone: TONES[tone], state: TONE_STATE[state]});
                     }
                 }
                 else if (REG_EX.KM.test(data[1]))
@@ -365,17 +490,19 @@ const Device = function(ip, pw)
                     const current = parseInt(kmBuf.toString('hex', 2, 4), 16);
                     const total = parseInt(kmBuf.toString('hex', 4, 6), 16);
                     const content = kmBuf.toString('hex', 6);
-                    current === 1 && (_self.tmpKmString = '');
-                    if (current <= total) {
-                        _self.tmpKmString += content;
+                    if (current === 1) {
+                        this.#kmStringSplitted = '';
                     }
-                    if (current == total) {
-                        const serializedDisplay = Buffer.from(_self.tmpKmString, 'hex').toString();
-                        if (_self.tmpKmString != _self.kmString)
+                    if (current <= total) {
+                        this.#kmStringSplitted += content;
+                    }
+                    if (current === total) {
+                        const serializedDisplay = Buffer.from(this.#kmStringSplitted, 'hex').toString();
+                        if (this.#kmStringSplitted != this.#kmStringComplete)
                         {
-                            _self.kmString = _self.tmpKmString;
-                            _self.parseKmData(serializedDisplay);
-                            _self.emit('km', _self.kmDisplay);
+                            this.#kmStringComplete = this.#kmStringSplitted;
+                            this.#parseKmData(serializedDisplay);
+                            this.emit('km', this.#kmDisplay);
                         }
                     }
                 }
@@ -383,105 +510,95 @@ const Device = function(ip, pw)
         }
     }
 
-    this.sendMessage = function(data)
-    {
-        _self.client.write(data);
-        _self.emit('messages', `>>>(${data.length}): ${data}`);
+    #sendMessage (data) {
+        this.#client.write(data);
+        this.emit('messages', `>>>(${data.length}): ${data}`);
     }
 
-    this.getTIMessage = function(data, resolve)
-    {
-        const nextReqId = _self._getReqId();
-        _self.resolve[nextReqId] = resolve;
+    #getTIMessage (data, resolve) {
+        const nextReqId = this.#getReqId();
+        this.#resolver[nextReqId] = resolve;
         return GET_TI_MSG_CONTENT(nextReqId, data);
     }
 
-    this.getOCMSMessage = function(data, resolve)
-    {
-        const nextReqId = _self._getReqId();
-        _self.resolve[nextReqId] = resolve;
+    #getOCMSMessage (data, resolve) {
+        const nextReqId = this.#getReqId();
+        this.#resolver[nextReqId] = resolve;
         return GET_OCMS_MSG_CONTENT(nextReqId, data)
     }
 
-    this.sendAuthRequest = function()
-    {
+    #sendAuthRequest () {
         return new Promise(resolve => {
-            _self.resolve['0'] = resolve;
-            _self.sendMessage(GET_AUTH_REQUEST_MSG(_self.pw));
+            this.#resolver['0'] = resolve;
+            this.#sendMessage(GET_AUTH_REQUEST_MSG(this.#pw));
         });
     }
 
-    this.setupInstrumentationService = function()
-    {
+    #setupInstrumentationService () {
         return new Promise(resolve => {
-            const data = `${DEFS.TM_INIT_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${_self.pw.length.toString().padStart(2, '0')}${Buffer.from(_self.pw).toString('hex')}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            const data = `${DEFS.TM_INIT_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${this.#pw.length.toString().padStart(2, '0')}${Buffer.from(this.#pw).toString('hex')}`
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this.setupControlMode = function()
-    {
+    #setupControlMode () {
         return new Promise(resolve => {
             const data = `${DEFS.TM_CONNECTION_MODE_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_INIT_NULL}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this.setupStateIndication = function()
-    {
+    #setupStateIndication () {
         return new Promise(resolve => {
             const data = `${DEFS.TM_INDICATE_STATES_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_SUBSCRIPTIONS}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this.setupInternalDataItems = function()
-    {
+    #setupInternalDataItems () {
         return new Promise(async resolve => {
-            const config = await _self.getConfig(['e164', 'related-device-type', 'software-version']);
-            _self.e164 = config['e164'];
-            _self.softwareVersion = config['software-version'] && config['software-version'].replace(/\s{2,}/g, ' ') || 'V0 R0.0.0';
-            _self.deviceType = _self.getDeviceType(config['related-device-type']);
-            _self.setDefaultColour();
+            const config = await this.getConfig(['e164', 'related-device-type', 'software-version']);
+            this.#e164 = config['e164'];
+            this.#softwareVersion = config['software-version'] && config['software-version'].replace(/\s{2,}/g, ' ') || 'V0 R0.0.0';
+            this.#setDeviceType(config['related-device-type']);
+            this.#setDefaultColour();
             resolve();
         });
     }
 
-    this.getDeviceType = function(type)
-    {
-        _self.emit('log', `getDeviceType() IP[${_self.ip}] E164[${_self.e164}] type[${type}]`);
-        this.deviceTypeString = type;
+    #setDeviceType (type) {
+        this.emit('log', `setDeviceType() IP[${this.#ip}] E164[${this.#e164}] type[${type}]`);
+        this.#deviceTypeString = type;
         if (type.match(/CP100/)) {
-            return DEVICE_TYPE.CP100;
+            this.#deviceType = DEVICE_TYPE.CP100;
         } else if (type.match(/CP110/)) {
-            return DEVICE_TYPE.CP110;
+            this.#deviceType = DEVICE_TYPE.CP110;
         } else if (type.match(/CP200/)) {
-            return DEVICE_TYPE.CP200;
+            this.#deviceType = DEVICE_TYPE.CP200;
         } else if (type.match(/CP205/)) {
-            return DEVICE_TYPE.CP205;
+            this.#deviceType = DEVICE_TYPE.CP205;
         } else if (type.match(/CP210/)) {
-            return DEVICE_TYPE.CP210;
+            this.#deviceType = DEVICE_TYPE.CP210;
         } else if (type.match(/CP400/)) {
-            return DEVICE_TYPE.CP400;
+            this.#deviceType = DEVICE_TYPE.CP400;
         } else if (type.match(/CP410/)) {
-            return DEVICE_TYPE.CP410;
+            this.#deviceType = DEVICE_TYPE.CP410;
         } else if (type.match(/CP600/)) {
-            return DEVICE_TYPE.CP600;
+            this.#deviceType = DEVICE_TYPE.CP600;
         } else if (type.match(/CP700/)) {
-            return DEVICE_TYPE.CP700;
+            this.#deviceType = DEVICE_TYPE.CP700;
         } else if (type.match(/CP710/)) {
-            return DEVICE_TYPE.CP710;
+            this.#deviceType = DEVICE_TYPE.CP710;
         } else {
-            return DEVICE_TYPE.NONE;
+            this.#deviceType = DEVICE_TYPE.NONE;
         }
     }
 
-    this.setDefaultColour = function()
-    {
-        switch (_self.deviceType) {
+    #setDefaultColour () {
+        switch (this.#deviceType) {
             case DEVICE_TYPE.CP100:
             case DEVICE_TYPE.CP110:
-                _self.defaultColour = LAMPCOLOUR[1];
+                this.#defaultColour = LAMPCOLOUR[1];
                 break;
             case DEVICE_TYPE.CP200:
             case DEVICE_TYPE.CP205:
@@ -491,42 +608,38 @@ const Device = function(ip, pw)
             case DEVICE_TYPE.CP600:
             case DEVICE_TYPE.CP700:
             case DEVICE_TYPE.CP710:
-                _self.defaultColour = LAMPCOLOUR[3]
+                this.#defaultColour = LAMPCOLOUR[3]
                 break;
             default:
-                _self.defaultColour = LAMPCOLOUR[0]
+                this.#defaultColour = LAMPCOLOUR[0]
         }
-        _self.emit('log', `setDefaultColour() IP[${_self.ip}] E164[${_self.e164}] colour[${_self.defaultColour}]`);
+        this.emit('log', `setDefaultColour() IP[${this.#ip}] E164[${this.#e164}] colour[${this.#defaultColour}]`);
     }
 
-    this.shutdownStateIndication = function()
-    {
-        _self.emit('log', `shutdownStateIndication() IP[${_self.ip}] E164[${_self.e164}]`);
+    #shutdownStateIndication () {
+        this.emit('log', `shutdownStateIndication() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(resolve => {
             const data = `${DEFS.TM_INDICATE_STATES_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_INIT_NULL}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this.setupKeepAlive = function()
-    {
-        _self.emit('log', `setupKeepAlive() IP[${_self.ip}] E164[${_self.e164}]`);
-        setInterval(async function() {
-            await _self.sendKeepAlive();
+    #setupKeepAlive () {
+        this.emit('log', `setupKeepAlive() IP[${this.#ip}] E164[${this.#e164}]`);
+        setInterval(async () => {
+            await this.#sendKeepAlive();
         }, 15000);
     }
 
-    this.sendKeepAlive = function()
-    {
-        _self.emit('log', `sendKeepAlive() IP[${_self.ip}] E164[${_self.e164}]`);
+    #sendKeepAlive () {
+        this.emit('log', `sendKeepAlive() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(resolve => {
             const data = `${DEFS.TM_KEEP_ALIVE_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_NULL}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this.parseDisplayData = function(data)
-    {
+    #parseDisplayData (data) {
         const lines = data.split(/[\r\n]{1,2}/).filter(elem => elem.trim().length > 0);
         const display = {}
         let handleObject = false;
@@ -585,64 +698,63 @@ const Device = function(ip, pw)
             }
 
             // find selected item
-            if (_self.deviceType >= DEVICE_TYPE.CP400 && value.match(/selected:1/))
+            if (this.#deviceType >= DEVICE_TYPE.CP400 && value.match(/selected:1/))
             {
-                _self.selectedItem = value.replace(/selected:1/, '').trim();
+                this.#selectedItem = value.replace(/selected:1/, '').trim();
             }
-            if (_self.deviceType < DEVICE_TYPE.CP400 && currentSubObjectName == 'OperaListBoxItem' && item.match(/string0/))
+            if (this.#deviceType < DEVICE_TYPE.CP400 && currentSubObjectName == 'OperaListBoxItem' && item.match(/string0/))
             {
-                _self.selectedItem = value.trim();
+                this.#selectedItem = value.trim();
             }
 
             // get text input mode
-            if (_self.deviceType < DEVICE_TYPE.CP400 && value.match(/\x28[123AaBbCcHEX]{3}\x29/))
+            if (this.#deviceType < DEVICE_TYPE.CP400 && value.match(/\x28[123AaBbCcHEX]{3}\x29/))
             {
-                _self.inputMode = value.match(/\x28([123AaBbCcHEX]{3})\x29/)[1];
+                this.#inputMode = value.match(/\x28([123AaBbCcHEX]{3})\x29/)[1];
             }
-            if (_self.deviceType >= DEVICE_TYPE.CP400 && value.match(/ModeNumeric|ModeCapitalised|ModeLowercase|ModeCapital/))
+            if (this.#deviceType >= DEVICE_TYPE.CP400 && value.match(/ModeNumeric|ModeCapitalised|ModeLowercase|ModeCapital/))
             {
                 switch(value) {
                     case 'ModeNumeric':
-                        _self.inputMode = '123';
+                        this.#inputMode = '123';
                         break;
                     case 'ModeCapitalised':
-                        _self.inputMode = 'Abc';
+                        this.#inputMode = 'Abc';
                         break;
                     case 'ModeLowercase':
-                        _self.inputMode = 'abc';
+                        this.#inputMode = 'abc';
                         break;
                     case 'ModeCapital':
-                        _self.inputMode = 'ABC';
+                        this.#inputMode = 'ABC';
                         break;
                     default:
-                        _self.inputMode = '123';
+                        this.#inputMode = '123';
                 }
             }
         }
-        _self.display = display;
-        if (_self.display['Toast'])
+        this.#display = display;
+        if (this.#display['Toast'])
         {
-            _self.lastToast = JSON.stringify(_self.display['Toast'])
+            this.#lastToastNotification = JSON.stringify(this.#display['Toast'])
         }
-        if (_self.display['PopupNotification'])
+        if (this.#display['PopupNotification'])
         {
-            _self.lastPopupNotification = JSON.stringify(_self.display['PopupNotification'])
+            this.#lastPopupNotification = JSON.stringify(this.#display['PopupNotification'])
         }
-        if (_self.display['PopupCall'] && _self.deviceType < DEVICE_TYPE.CP400)
+        if (this.#display['PopupCall'] && this.#deviceType < DEVICE_TYPE.CP400)
         {
-            _self.callInfo = JSON.stringify(_self.display['PopupCall'])
-            _self.remoteNameNumber = _self.display['PopupCall']['caption'] ? _self.display['PopupCall']['caption'] : ''
+            this.#remoteCallInfo = JSON.stringify(this.#display['PopupCall'])
+            this.#remoteNameNumber = this.#display['PopupCall']['caption'] ? this.#display['PopupCall']['caption'] : ''
         }
-        if (_self.display['ContactDetails'] && _self.deviceType >= DEVICE_TYPE.CP400)
+        if (this.#display['ContactDetails'] && this.#deviceType >= DEVICE_TYPE.CP400)
         {
-            _self.callInfo = JSON.stringify(_self.display['ContactDetails'])
-            _self.remoteNameNumber = _self.display['ContactDetails']['string0'] ? _self.display['ContactDetails']['string0'] : ''
-            _self.remoteNameNumber+= _self.display['ContactDetails']['string1'] ? ` ${_self.display['ContactDetails']['string1']}` : ''
+            this.#remoteCallInfo = JSON.stringify(this.#display['ContactDetails'])
+            this.#remoteNameNumber = this.#display['ContactDetails']['string0'] ? this.#display['ContactDetails']['string0'] : ''
+            this.#remoteNameNumber+= this.#display['ContactDetails']['string1'] ? ` ${this.#display['ContactDetails']['string1']}` : ''
         }
     }
 
-    this.parseKmData = function(data)
-    {
+    #parseKmData (data) {
         const lines = data.split(/[\r\n]{1,2}/).filter(elem => elem.trim().length > 0);
         const kmDisplay = {}
         let handleObject = false;
@@ -696,56 +808,53 @@ const Device = function(ip, pw)
                 currentSubObject[item] = value;
             }
         }
-        _self.kmDisplay = kmDisplay;
+        this.#kmDisplay = kmDisplay;
     }
 
     /***
         Key press/release functions
     ***/
-    this._keyPress = function(key) {
-        const _self = this;
+    #keyPress (key) {
         return new Promise(resolve => {
-            const keyData = Buffer.from([01, key, KEYS.EVT_KEY_PRESSED])
+            const keyData = Buffer.from([0x01, key, KEYS.EVT_KEY_PRESSED])
             const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${keyData.length.toString().padStart(2, '0')}${keyData.toString('hex')}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     };
-    this._keyRelease = function(key) {
-        const _self = this;
+    
+    #keyRelease (key) {
         return new Promise(resolve => {
-            const keyData = Buffer.from([01, key, KEYS.EVT_KEY_RELEASED])
+            const keyData = Buffer.from([0x01, key, KEYS.EVT_KEY_RELEASED])
             const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${keyData.length.toString().padStart(2, '0')}${keyData.toString('hex')}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     };
 
     /***
         OCMS set/get functions
     ***/
-    this._setOCMS = function(item, value) {
-        const _self = this;
+    #setOCMS (item, value) {
         return new Promise(resolve => {
-            _self.sendMessage(_self.getOCMSMessage(SET_OCMS_DATA_MSG(item, value), resolve));
+            this.#sendMessage(this.#getOCMSMessage(SET_OCMS_DATA_MSG(item, value), resolve));
         });
     };
-    this._getOCMS = function(item) {
-        const _self = this;
+    
+    #getOCMS (item) {
         return new Promise(resolve => {
-            _self.sendMessage(_self.getOCMSMessage(GET_OCMS_DATA_MSG(item), resolve));
+            this.#sendMessage(this.#getOCMSMessage(GET_OCMS_DATA_MSG(item), resolve));
         });
     };
 
-    this._setInputMode = function(mode) {
-        const _self = this;
-        _self.emit('log', `setInputMode() IP[${_self.ip}] E164[${_self.e164}] mode[${mode}]`)
+    #setInputMode (mode) {
+        this.emit('log', `setInputMode() IP[${this.#ip}] E164[${this.#e164}] mode[${mode}]`)
         return new Promise(async resolve => {
-            if (_self.connected === true)
+            if (this.#connected === true)
             {
                 let i=0
                 do {
-                    if (_self.inputMode == mode) return resolve(true)
-                    await _self.normalKeyPress(KEYS.KEY_HASH)
-                    _self.emit('log', `setInputMode() IP[${_self.ip}] E164[${_self.e164}] inputMode[${_self.inputMode}] mode[${mode}]`)
+                    if (this.#inputMode == mode) return resolve(true)
+                    await this.normalKeyPress(KEYS.KEY_HASH)
+                    this.emit('log', `setInputMode() IP[${this.#ip}] E164[${this.#e164}] inputMode[${this.#inputMode}] mode[${mode}]`)
                     i++
                 } while(i < 6)
             }
@@ -753,17 +862,17 @@ const Device = function(ip, pw)
         });
     };
 
-    this._isLetter = function(str) {
+    #isLetter (str) {
         return Object.keys(CHAR).indexOf(str) >= 0
     }
-    this._isNumber = function(str) {
+    #isNumber (str) {
         return str.length === 1 && RegExp(/[0-9]/).test(str)
     }
-    this._isSpecial = function(str) {
+    #isSpecial (str) {
         return Object.keys(CHAR_SPECIAL).indexOf(str) >= 0
     }
 
-    this._getConfWithDefaults = function(provided, defaults) {
+    #getConfWithDefaults (provided, defaults) {
         const conf = {};
         const keys = Object.keys(defaults);
         for (const key in keys) {
@@ -772,14 +881,14 @@ const Device = function(ip, pw)
         return conf;
     }
 
-    this._sendGetCodecRequest = function() {
+    #sendGetCodecRequest () {
         return new Promise(resolve => {
             const data = `${DEFS.TM_CODEC_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${DEFS.TM_INIT_REQ}${DEFS.TM_INIT_NULL}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this._sendSpeechTestRequest = function(mode, duration, delay) {
+    #sendSpeechTestRequest (mode, duration, delay) {
         return new Promise(resolve => {
             var durationByte4 = 0xff & duration;
             var durationByte3 = 0xff & (duration >> 8);
@@ -787,874 +896,782 @@ const Device = function(ip, pw)
             var durationByte1 = 0xff & (duration >> 24);
             var delayByte2 = 0xff & delay;
             var delayByte1 = 0xff & (delay >> 8);
-            const testData = Buffer.from([mode, 00, 01, 00, 01, durationByte1, durationByte2, durationByte3, durationByte4, delayByte1, delayByte2])
+            const testData = Buffer.from([mode, 0x00, 0x01, 0x00, 0x01, durationByte1, durationByte2, durationByte3, durationByte4, delayByte1, delayByte2])
             const data = `${DEFS.TM_SPEECH_PATH_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${testData.length.toString().padStart(2, '0')}${testData.toString('hex')}`
-            _self.sendMessage(_self.getTIMessage(data, resolve));
+            this.#sendMessage(this.#getTIMessage(data, resolve));
         });
     }
 
-    this._startSpeechTestTransmit = function() {
-        _self.emit('log', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
+    #startSpeechTestTransmit () {
+        this.emit('log', `startSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
-            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_START, 0, 0);
+            const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_TM_START, 0, 0);
             const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
             const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_START}`);
             if (regEx.test(data) === false) {
-                _self.emit('error', `startSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+                this.emit('error', `startSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}] data[${data}]`);
             }
             resolve();
         });
     }
 
-    this._stopSpeechTestTransmit = function() {
-        _self.emit('log', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}]`);
+    #stopSpeechTestTransmit () {
+        this.emit('log', `stopSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
-            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_TM_STOP, 0, 0);
+            const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_TM_STOP, 0, 0);
             const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
             const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_TM_STOP}`);
             if (regEx.test(data) === false) {
-                _self.emit('error', `stopSpeechTestTransmit() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+                this.emit('error', `stopSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}] data[${data}]`);
             }
             resolve();
         });
     }
 
-    this._startSpeechTestReceive = function() {
-        _self.emit('log', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
+    #startSpeechTestReceive () {
+        this.emit('log', `startSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
-            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_START, speechTestLength, 0);
+            const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_START, speechTestLength, 0);
             const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
             const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_START}`);
             if (regEx.test(data) === false) {
-                _self.emit('error', `startSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+                this.emit('error', `startSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}] data[${data}]`);
             }
             resolve();
         });
     }
 
-    this._stopSpeechTestReceive = function() {
-        _self.emit('log', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}]`);
+    #stopSpeechTestReceive () {
+        this.emit('log', `stopSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
-            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_STOP, 0, 0);
+            const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_STOP, 0, 0);
             const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
             const regEx = new RegExp(`${DEFS.SPEECHTEST_SUCCESS}${DEFS.SPEECHTEST_RECV_STOP}`);
             if (regEx.test(data) === false) {
-                _self.emit('error', `stopSpeechTestReceive() IP[${_self.ip}] E164[${_self.e164}] data[${data}]`);
+                this.emit('error', `stopSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}] data[${data}]`);
             }
             resolve();
         });
     }
 
-    this._getSpeechTestResults = function() {
-        _self.emit('log', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}]`);
+    getSpeechTestResults () {
+        this.emit('log', `getSpeechTestResults() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
-            const res = await _self._sendSpeechTestRequest(DEFS.SPEECHTEST_RESULT, 0, 0);
+            const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_RESULT, 0, 0);
             const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
             const resultBuffer = Buffer.from(data, 'hex');
             const content = resultBuffer.toString('utf8', 10);
             try {
-                _self.speechPathTestResult = JSON.parse(content);
-                _self.speechPathTestResult.codec = await _self.getCodec();
+                this.#speechPathTestResult = JSON.parse(content);
+                this.#speechPathTestResult.codec = await this.getCodec();
             } catch(e) {
-                _self.emit('error', `getSpeechTestResults() IP[${_self.ip}] E164[${_self.e164}] error[${e.message}] content[${content}]`);
+                this.emit('error', `getSpeechTestResults() IP[${this.#ip}] E164[${this.#e164}] error[${e.message}] content[${content}]`);
             }
-            resolve(_self.speechPathTestResult);
+            resolve(this.#speechPathTestResult);
         });
     }
-}
-util.inherits(Device, EventEmitter);
 
-Device.prototype.init = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { initTestMode: true, timeout: 5 });
-    _self.emit('log', `init() IP[${_self.ip}] E164[${_self.e164}] initTestMode[${conf.initTestMode}] timeout[${conf.timeout}]`);
-    return new Promise(async (resolve, reject) => {
-        process.stdout.write(`trying to connect to ${_self.ip}...`)
-        const failTime = Math.floor(Date.now() / 1000) + conf.timeout;
-        let run = true;
-        do {
-            await _self.establishConnection().then(() => {
-                run = false;
-            })
-            .catch((err) => {
-                const now = Math.floor(Date.now() / 1000);
-                if (now >= failTime)
+    setConfig (config) {
+        this.emit('log', `setConfig() IP[${this.#ip}] E164[${this.#e164}] items[${Object.keys(config).length}]`);
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                const items = Object.keys(config)
+                for (let i = 0; i < items.length; i++)
                 {
-                    console.log('failed')
-                    run = false;
-                }
-                else
-                {
-                    process.stdout.write('.');
-                }
-            });
-        } while (run === true);
-        if (_self.connected == true)
-        {
-            const res = await _self.sendAuthRequest();
-            if (res.match(/Accepted/) == false)
-            {
-                throw new Error('authorization error')
-            }
-            if (conf.initTestMode == true)
-            {
-                await _self.setupInstrumentationService();
-                await _self.setupControlMode();
-                await _self.setupStateIndication();
-                await _self.setupInternalDataItems();
-                await _self.hookOff();
-                await _self.sleep(1000);
-                await _self.hookOn();
-                await _self.sleep(500);
-            }
-            _self.setupKeepAlive();
-            if (_self.subscribed === true)
-            {
-                resolve(`success. ${_self.deviceTypeString} ${_self.e164}@${_self.ip} [${_self.softwareVersion}] DONGLE[${_self.fullAccess}]`);
-            }
-            else
-            {
-                reject(`could not connect to phone test interface. Maybe another session is still active.`)
-            }
-        }
-        else
-        {
-            reject(`could not connect within ${conf.timeout} seconds`)
-        }
-    });
-};
-
-Device.prototype.setConfig = function(config) {
-    const _self = this;
-    _self.emit('log', `setConfig() IP[${_self.ip}] E164[${_self.e164}] items[${Object.keys(config).length}]`);
-    return new Promise(async resolve => {
-        if (_self.connected == true)
-        {
-            const items = Object.keys(config)
-            for (let i = 0; i < items.length; i++)
-            {
-                await _self._setOCMS(items[i], config[items[i]]);
-                await _self.sleep(100);
-            }
-        }
-        resolve();
-    });
-};
-
-Device.prototype.getConfig = function(items) {
-    const _self = this;
-    _self.emit('log', `setConfig() IP[${_self.ip}] E164[${_self.e164}] items[${items.length}]`);
-    return new Promise(async resolve => {
-        const config = {}
-        if (_self.connected == true)
-        {
-            for (let i = 0; i < items.length; i++)
-            {
-                let res = await _self._getOCMS(items[i]);
-                const regEx = new RegExp(`name=\"${items[i]}\"(.+)document`)
-                res = regEx.exec(res)
-                Array.isArray(res) && (res = res[1].match(/itemValue\>([^<]+)/))
-                Array.isArray(res) && (config[items[i]] = res[1])
-                await _self.sleep(100);
-            }
-        }
-        resolve(config);
-    });
-};
-
-Device.prototype.getSpeechPathTestResults = function() {
-    const _self = this;
-    return _self.speechPathTestResult;
-};
-
-Device.prototype.getPhoneNumber = function() {
-    const _self = this;
-    return _self.e164;
-};
-
-Device.prototype.getDeviceType = function() {
-    const _self = this;
-    return _self.deviceType;
-};
-
-Device.prototype.getSelectedItem = function() {
-    const _self = this;
-    return _self.selectedItem;
-};
-
-Device.prototype.assertCallState = function(state) {
-    const _self = this;
-    const currentState = _self.callState[_self.e164];
-    const testedState = Array.isArray(state) ? state : [state]
-    _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] expected[${JSON.stringify(testedState)}]`)
-    for (let i = 0; i < testedState.length; i++)
-    {
-        if (currentState && typeof currentState == 'object')
-        {
-            const keys = Object.keys(currentState)
-            for (let j = 0; j < keys.length; j++)
-            {
-                _self.emit('log', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] index[${keys[j]}] state[${currentState[keys[j]]}]`)
-                if (currentState[keys[j]].toLowerCase() == testedState[i].toLowerCase())
-                {
-                    return
+                    await this.#setOCMS(items[i], config[items[i]]);
+                    await this.sleep(100);
                 }
             }
-        }
-    }
-    _self.emit('error', `assertCallState() IP[${_self.ip}] E164[${_self.e164}] current[${JSON.stringify(currentState)}] expected[${JSON.stringify(testedState)}]`)
-};
-
-Device.prototype.assertSelectedItem = function(selected) {
-    const _self = this;
-    const currentSelected = _self.selectedItem
-    _self.emit('log', `assertSelectedItem() IP[${_self.ip}] E164[${_self.e164}] current[${currentSelected}] expected[${selected}]`)
-    if (currentSelected.toLowerCase().match(selected.toLowerCase()) == false)
-    {
-        _self.emit('error', `assertSelectedItem() IP[${_self.ip}] E164[${_self.e164}] current[${currentSelected}] expected[${selected}]`)
-    }
-};
-
-Device.prototype.assertToast = function(message) {
-    const _self = this;
-    const lastToast = _self.lastToast
-    _self.emit('log', `assertToast() IP[${_self.ip}] E164[${_self.e164}] current[${lastToast}] expected[${message}]`)
-    if (lastToast.toLowerCase().match(message.toLowerCase()) == false)
-    {
-        _self.emit('error', `assertToast() IP[${_self.ip}] E164[${_self.e164}] current[${lastToast}] expected[${message}]`)
-    }
-};
-
-Device.prototype.assertNotification = function(message) {
-    const _self = this;
-    const lastPopupNotification = _self.lastPopupNotification
-    _self.emit('log', `assertNotification() IP[${_self.ip}] E164[${_self.e164}] current[${lastPopupNotification}] expected[${message}]`)
-    if (lastPopupNotification.toLowerCase().match(message.toLowerCase()) == false)
-    {
-        _self.emit('error', `assertNotification() IP[${_self.ip}] E164[${_self.e164}] current[${lastPopupNotification}] expected[${message}]`)
-    }
-};
-
-Device.prototype.assertKeyState = function(keyId, mode, colour) {
-    const _self = this;
-    const assertedColour = colour || _self.defaultColour;
-    let currentMode = LAMPMODE[2];
-    let currentColour = LAMPCOLOUR[0];
-    if (_self.lampState[keyId]) {
-        const ledBuf = Buffer.from(_self.lampState[keyId], 'hex')
-        currentMode = LAMPMODE[ledBuf.readUInt8(2)];
-        currentColour = LAMPCOLOUR[ledBuf.readUInt8(3)];
-    }
-    _self.emit('log', `assertKeyState IP[${_self.ip}] E164[${_self.e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
-    if (currentMode != mode || currentColour != assertedColour)
-    {
-        _self.emit('error', `assertKeyState() IP[${_self.ip}] E164[${_self.e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
-    }
-};
-
-Device.prototype.assertRemotePartyInfo = function(info) {
-    const _self = this;
-    const lastNameNumber = _self.remoteNameNumber;
-    _self.emit('log', `assertRemotePartyInfo() IP[${_self.ip}] E164[${_self.e164}] lastNameNumber[${lastNameNumber}] info[${info}]`)
-    const regex = new RegExp(info);
-    if (regex.test(lastNameNumber) == false)
-    {
-        _self.emit('error', `assertRemotePartyInfo() IP[${_self.ip}] E164[${_self.e164}] lastNameNumber[${lastNameNumber}] info[${info}]`)
-    }
-};
-
-Device.prototype.assertIdleState = function() {
-    const _self = this;
-    _self.emit('log', `assertIdleState() IP[${_self.ip}] E164[${_self.e164}]`)
-    _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertCallState('connectionCleared')
-}
-
-Device.prototype.assertDiallingState = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
-    _self.emit('log', `assertDiallingState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-    }
-    _self.assertCallState('serviceInitiated')
-}
-
-Device.prototype.assertConsultationCallState = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
-    _self.emit('log', `assertConsultationCallState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (_self.deviceType >= DEVICE_TYPE.CP400)
-            {
-                _self.assertToast(`${conf.remotePartyNumber} is now on hold`)
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-    }
-    _self.assertCallState('serviceInitiated')
-}
-
-Device.prototype.assertIncomingCall = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { headset: false, remotePartyInfo: '' });
-    _self.emit('log', `assertIncomingCall() IP[${_self.ip}] E164[${_self.e164}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'FLASH')
-            _self.assertSelectedItem('Accept')
-            break;
-        default:
-            _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'FLASH')
-            _self.assertKeyState(KEYS.LED_ALERT, 'FLASH')
-            if (conf.headset === true)
-            {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'FLASH')
-            }
-            _self.assertSelectedItem('Answer')
-    }
-    _self.assertCallState('delivered')
-    _self.assertRemotePartyInfo(conf.remotePartyInfo);
-}
-
-Device.prototype.assertOutgoingCall = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
-    _self.emit('log', `assertOutgoingCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('Disconnect')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('End')
-    }
-    _self.assertCallState('delivered')
-    _self.assertRemotePartyInfo(conf.remotePartyInfo);
-}
-
-Device.prototype.assertConnectedCall = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
-    _self.emit('log', `assertConnectedCall() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('Disconnect')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('End')
-    }
-    _self.assertCallState(['established', 'retrieved', 'conferenced']);
-    _self.assertRemotePartyInfo(conf.remotePartyInfo);
-}
-
-Device.prototype.assertHoldState = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
-    _self.emit('log', `assertHoldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
-            _self.assertSelectedItem('Disconnect')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (_self.deviceType >= DEVICE_TYPE.CP400)
-            {
-                _self.assertToast(`${conf.remotePartyNumber} is now on hold`)
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY', 'YELLOW')
-            _self.assertSelectedItem('End')
-    }
-    _self.assertCallState('held')
-}
-
-Device.prototype.assertHeldState = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
-    _self.emit('log', `assertHeldState() IP[${_self.ip}] E164[${_self.e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('Disconnect')
-            break;
-        default:
-            if (conf.loudspeaker === true) {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            if (conf.headset === true) {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
-            } else {
-                _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-            }
-
-            _self.assertKeyState(KEYS.LED_ALERT, 'STEADY')
-            _self.assertSelectedItem('End')
-    }
-    _self.assertCallState('held')
-}
-
-Device.prototype.assertEndedCallIdle = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { remotePartyNumber: '' });
-    _self.emit('log', `assertEndedCallIdle() IP[${_self.ip}] E164[${_self.e164}] remotePartyNumber[${conf.remotePartyNumber}]`)
-    _self.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
-    _self.assertCallState('connectionCleared')
-    switch (_self.deviceType)
-    {
-        case DEVICE_TYPE.CP100:
-        case DEVICE_TYPE.CP110:
-        case DEVICE_TYPE.CP200:
-        case DEVICE_TYPE.CP205:
-        case DEVICE_TYPE.CP210:
-            _self.assertNotification(`Ends: ${conf.remotePartyNumber}`)
-            break;
-        default:
-            _self.assertToast(`Call with ${conf.remotePartyNumber} ended`)
-    }
-}
-
-Device.prototype.sleep = function(time) {
-    const _self = this;
-    _self.emit('log', `sleep() IP[${_self.ip}] E164[${_self.e164}] time[${time}]`)
-    return new Promise(resolve => {
-        setTimeout(() => {
             resolve();
-        }, time)
-    });
-};
+        });
+    };
 
-Device.prototype.shutdown = function()
-{
-    const _self = this;
-    _self.emit('log', `shutdown() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.client && _self.connected === true)
-        {
-            _self.connected = false;
-            await _self.hookOff();
-            await _self.hookOn();
-            await _self.shutdownStateIndication();
-            _self.client.destroy();
-        }
-        resolve();
-    });
-}
-
-Device.prototype.hookOff = function() {
-    const _self = this;
-    _self.emit('log', `hookOff() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(resolve => {
-        const hookData = Buffer.from([01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_OFF])
-        const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
-        _self.sendMessage(_self.getTIMessage(data, resolve));
-    });
-};
-
-Device.prototype.hookOn = function() {
-    const _self = this;
-    _self.emit('log', `hookOn() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(resolve => {
-        const hookData = Buffer.from([01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_ON])
-        const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
-        _self.sendMessage(_self.getTIMessage(data, resolve));
-    });
-};
-
-Device.prototype.dial = function(keys) {
-    const _self = this;
-    _self.emit('log', `dial() IP[${_self.ip}] E164[${_self.e164}] keys[${keys}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
-        {
-            for (let i = 0; i < keys.length; i++)
+    getConfig (items) {
+        this.emit('log', `setConfig() IP[${this.#ip}] E164[${this.#e164}] items[${items.length}]`);
+        return new Promise(async resolve => {
+            const config = {}
+            if (this.#connected === true)
             {
-                await _self.normalKeyPress(NUMPAD[keys[i]]);
+                for (let i = 0; i < items.length; i++)
+                {
+                    let res = await this.#getOCMS(items[i]);
+                    const regEx = new RegExp(`name=\"${items[i]}\"(.+)document`)
+                    res = regEx.exec(res)
+                    Array.isArray(res) && (res = res[1].match(/itemValue\>([^<]+)/))
+                    Array.isArray(res) && (config[items[i]] = res[1])
+                    await this.sleep(100);
+                }
             }
-        }
-        resolve();
-    });
-};
+            resolve(config);
+        });
+    };
 
-Device.prototype.write = function(text) {
-    const _self = this;
-    _self.emit('log', `write() IP[${_self.ip}] E164[${_self.e164}] text[${text}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    getSpeechPathTestResults () {
+        return this.#speechPathTestResult;
+    };
+
+    getPhoneNumber () {
+        return this.#e164;
+    };
+
+    getDeviceType () {
+        return this.#deviceType;
+    };
+
+    getSelectedItem () {
+        return this.#selectedItem;
+    };
+
+    /**
+     * Get the local IP address used to connect to the device.
+     * @returns {string} The local IP address used on connecting to the device
+     */
+    getLocalAddress () {
+        return this.#localAddress;
+    };
+
+    /**
+     * Get the local port used to connect to the device.
+     * @returns {string} The local port used on connecting to the device
+     */
+    getLocalPort () {
+        return this.#localPort;
+    };
+
+    assertCallState (state) {
+        const currentState = this.#callState[this.#e164];
+        const testedState = Array.isArray(state) ? state : [state]
+        this.emit('log', `assertCallState() IP[${this.#ip}] E164[${this.#e164}] expected[${JSON.stringify(testedState)}]`)
+        for (let i = 0; i < testedState.length; i++)
         {
-            for (let i = 0; i < text.length; i++)
+            if (currentState && typeof currentState == 'object')
             {
-                const char_normal = text[i]
-                const char_ascii  = Buffer.from(text[i].toLowerCase(), 'utf8').toString('hex')
-                if (_self._isNumber(char_normal) === true)
+                const keys = Object.keys(currentState)
+                for (let j = 0; j < keys.length; j++)
                 {
-                    await _self._setInputMode('123')
-                    await _self.dial(char_normal)
-                }
-                else if (_self._isSpecial(char_ascii) === true)
-                {
-                    await _self._setInputMode('abc')
-                    await _self.dial(CHAR_SPECIAL[char_ascii])
-                }
-                else if (_self._isLetter(char_ascii) === true)
-                {
-                    if (char_normal == char_normal.toUpperCase()) {
-                        await _self._setInputMode('Abc')
-                        await _self.dial(CHAR[char_ascii])
-                    } else {
-                        await _self._setInputMode('abc')
-                        await _self.dial(CHAR[char_ascii])
+                    this.emit('log', `assertCallState() IP[${this.#ip}] E164[${this.#e164}] index[${keys[j]}] state[${currentState[keys[j]]}]`)
+                    if (currentState[keys[j]].toLowerCase() == testedState[i].toLowerCase())
+                    {
+                        return
                     }
                 }
-                await _self.sleep(500)
             }
         }
-        resolve();
-    });
-};
+        this.emit('error', `assertCallState() IP[${this.#ip}] E164[${this.#e164}] current[${JSON.stringify(currentState)}] expected[${JSON.stringify(testedState)}]`)
+    };
 
-Device.prototype.longKeyPress = function(key) {
-    const _self = this;
-    _self.emit('log', `longKeyPress() IP[${_self.ip}] E164[${_self.e164}] key[${key}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertSelectedItem (selected) {
+        this.emit('log', `assertSelectedItem() IP[${this.#ip}] E164[${this.#e164}] current[${this.#selectedItem}] expected[${selected}]`)
+        if (this.#selectedItem.toLowerCase().match(selected.toLowerCase()) == false)
         {
-            await _self._keyPress(key);
-            await _self.sleep(2000);
-            await _self._keyRelease(key);
-            await _self.sleep(500);
+            this.emit('error', `assertSelectedItem() IP[${this.#ip}] E164[${this.#e164}] current[${this.#selectedItem}] expected[${selected}]`)
         }
-        resolve();
-    });
-};
+    };
 
-Device.prototype.normalKeyPress = function(key) {
-    const _self = this;
-    _self.emit('log', `normalKeyPress() IP[${_self.ip}] E164[${_self.e164}] key[${key}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertToast (message) {
+        this.emit('log', `assertToast() IP[${this.#ip}] E164[${this.#e164}] current[${this.#lastToastNotification}] expected[${message}]`)
+        if (this.#lastToastNotification.toLowerCase().match(message.toLowerCase()) == false)
         {
-            await _self._keyPress(key);
-            await _self.sleep(500);
-            await _self._keyRelease(key);
-            await _self.sleep(500);
+            this.emit('error', `assertToast() IP[${this.#ip}] E164[${this.#e164}] current[${this.#lastToastNotification}] expected[${message}]`)
         }
-        resolve();
-    });
-};
+    };
 
-Device.prototype.scrollUntil = function(target) {
-    const _self = this;
-    const targets = Array.isArray(target) ? target : [target]
-    _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] targets[${JSON.stringify(targets)}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertNotification (message) {
+        this.emit('log', `assertNotification() IP[${this.#ip}] E164[${this.#e164}] current[${this.#lastPopupNotification}] expected[${message}]`)
+        if (this.#lastPopupNotification.toLowerCase().match(message.toLowerCase()) == false)
         {
-            await _self.longKeyPress(KEYS.KEY_NAVI_UP);
-            let currentSelected = lastselected = _self.selectedItem;
-            do {
-                if (targets.filter(elem => currentSelected.match(elem)).length > 0) return resolve(true);
-                lastSelected = currentSelected;
-                await _self.down();
-                currentSelected = _self.selectedItem;
-                _self.emit('log', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] targets[${JSON.stringify(targets)}]`)
-                if (lastSelected == currentSelected)
-                {
-                    _self.emit('error', `scrollUntil() IP[${_self.ip}] E164[${_self.e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] targets[${JSON.stringify(targets)}]`)
-                    return resolve(false);
+            this.emit('error', `assertNotification() IP[${this.#ip}] E164[${this.#e164}] current[${this.#lastPopupNotification}] expected[${message}]`)
+        }
+    };
+
+    assertKeyState (keyId, mode, colour) {
+        const assertedColour = colour || this.#defaultColour;
+        let currentMode = LAMPMODE[2];
+        let currentColour = LAMPCOLOUR[0];
+        if (this.#lampState[keyId]) {
+            const ledBuf = Buffer.from(this.#lampState[keyId], 'hex')
+            currentMode = LAMPMODE[ledBuf.readUInt8(2)];
+            currentColour = LAMPCOLOUR[ledBuf.readUInt8(3)];
+        }
+        this.emit('log', `assertKeyState IP[${this.#ip}] E164[${this.#e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
+        if (currentMode != mode || currentColour != assertedColour)
+        {
+            this.emit('error', `assertKeyState() IP[${this.#ip}] E164[${this.#e164}] keyId[${keyId}] current[${currentMode},${currentColour}] expected[${mode},${assertedColour}]`)
+        }
+    };
+
+    assertRemotePartyInfo (info) {
+        this.emit('log', `assertRemotePartyInfo() IP[${this.#ip}] E164[${this.#e164}] lastNameNumber[${this.#remoteNameNumber}] info[${info}]`)
+        const regex = new RegExp(info);
+        if (regex.test(this.#remoteNameNumber) === false && regex.test(this.#remoteCallInfo) === false)
+        {
+            this.emit('error', `assertRemotePartyInfo() IP[${this.#ip}] E164[${this.#e164}] lastNameNumber[${this.#remoteNameNumber}] info[${info}]`)
+        }
+    };
+
+    assertIdleState () {
+        this.emit('log', `assertIdleState() IP[${this.#ip}] E164[${this.#e164}]`)
+        this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+        this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+        this.assertCallState('connectionCleared')
+    }
+
+    assertDiallingState (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
+        this.emit('log', `assertDiallingState() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
+        {
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
                 }
-            } while(true)
-        } else {
-            resolve(false);
-        }
-    });
-};
 
-Device.prototype.ok = function() {
-    const _self = this;
-    _self.emit('log', `ok() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
-        {
-            await _self._keyPress(KEYS.KEY_NAVI_OK);
-            await _self.sleep(500);
-            await _self._keyRelease(KEYS.KEY_NAVI_OK);
-            await _self.sleep(500);
-        }
-        resolve();
-    });
-};
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
 
-Device.prototype.up = function() {
-    const _self = this;
-    _self.emit('log', `up() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
-        {
-            await _self._keyPress(KEYS.KEY_NAVI_UP);
-            await _self.sleep(500);
-            await _self._keyRelease(KEYS.KEY_NAVI_UP);
-            await _self.sleep(500);
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
         }
-        resolve();
-    });
-};
+        this.assertCallState('serviceInitiated')
+    }
 
-Device.prototype.down = function() {
-    const _self = this;
-    _self.emit('log', `down() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertConsultationCallState (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
+        this.emit('log', `assertConsultationCallState() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.KEY_NAVI_DOWN);
-            await _self.sleep(500);
-            await _self._keyRelease(KEYS.KEY_NAVI_DOWN);
-            await _self.sleep(500);
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (this.#deviceType >= DEVICE_TYPE.CP400)
+                {
+                    this.assertToast(`${conf.remotePartyNumber} is now on hold`)
+                }
+
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
         }
-        resolve();
-    });
-};
+        this.assertCallState('serviceInitiated')
+    }
 
-Device.prototype.left = function() {
-    const _self = this;
-    _self.emit('log', `left() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertIncomingCall (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { headset: false, remotePartyInfo: '' });
+        this.emit('log', `assertIncomingCall() IP[${this.#ip}] E164[${this.#e164}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.KEY_NAVI_LEFT);
-            await _self.sleep(500);
-            await _self._keyRelease(KEYS.KEY_NAVI_LEFT);
-            await _self.sleep(500);
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'FLASH')
+                this.assertSelectedItem('Accept')
+                break;
+            default:
+                this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'FLASH')
+                this.assertKeyState(KEYS.LED_ALERT, 'FLASH')
+                if (conf.headset === true)
+                {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'FLASH')
+                }
+                this.assertSelectedItem('Answer')
         }
-        resolve();
-    });
-};
+        this.assertCallState('delivered')
+        this.assertRemotePartyInfo(conf.remotePartyInfo);
+    }
 
-Device.prototype.right = function() {
-    const _self = this;
-    _self.emit('log', `right() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertOutgoingCall (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
+        this.emit('log', `assertOutgoingCall() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.KEY_NAVI_RIGHT);
-            await _self.sleep(500);
-            await _self._keyRelease(KEYS.KEY_NAVI_RIGHT);
-            await _self.sleep(500);
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('Disconnect')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('End')
         }
-        resolve();
-    });
-};
+        this.assertCallState('delivered')
+        this.assertRemotePartyInfo(conf.remotePartyInfo);
+    }
 
-Device.prototype.restart = function() {
-    const _self = this;
-    _self.emit('log', `restart() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertConnectedCall (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyInfo: '' });
+        this.emit('log', `assertConnectedCall() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.COMBO_RESTART);
-            await _self.sleep(1500);
-            await _self.dial(_self.pw);
-            await _self.ok();
-            _self.client.destroy();
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('Disconnect')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('End')
         }
-        resolve();
-    });
-};
+        this.assertCallState(['established', 'retrieved', 'conferenced']);
+        this.assertRemotePartyInfo(conf.remotePartyInfo);
+    }
 
-Device.prototype.factoryReset = function() {
-    const _self = this;
-    _self.emit('log', `factoryReset() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertHoldState (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false, remotePartyNumber: '' });
+        this.emit('log', `assertHoldState() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.COMBO_RESET);
-            await _self.sleep(1500);
-            await _self.dial('124816');
-            await _self.ok();
-            _self.client.destroy();
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
+                this.assertSelectedItem('Disconnect')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (this.#deviceType >= DEVICE_TYPE.CP400)
+                {
+                    this.assertToast(`${conf.remotePartyNumber} is now on hold`)
+                }
+
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY', 'YELLOW')
+                this.assertSelectedItem('End')
         }
-        resolve();
-    });
-};
+        this.assertCallState('held')
+    }
 
-Device.prototype.fakeHeadsetConnected = function() {
-    const _self = this;
-    _self.emit('log', `fakeHeadsetConnected() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertHeldState (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { loudspeaker: false, headset: false });
+        this.emit('log', `assertHeldState() IP[${this.#ip}] E164[${this.#e164}] loudspeaker[${conf.loudspeaker}] headset[${conf.headset}]`)
+        switch (this.#deviceType)
         {
-            await _self._keyPress(KEYS.SOCKET_HEADSET);
-            await _self.sleep(250);
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('Disconnect')
+                break;
+            default:
+                if (conf.loudspeaker === true) {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                if (conf.headset === true) {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'STEADY')
+                } else {
+                    this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+                }
+
+                this.assertKeyState(KEYS.LED_ALERT, 'STEADY')
+                this.assertSelectedItem('End')
         }
-        resolve();
-    });
-};
+        this.assertCallState('held')
+    }
 
-Device.prototype.fakeHeadsetDisconnected = function() {
-    const _self = this;
-    _self.emit('log', `fakeHeadsetDisconnected() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
+    assertEndedCallIdle (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { remotePartyNumber: '' });
+        this.emit('log', `assertEndedCallIdle() IP[${this.#ip}] E164[${this.#e164}] remotePartyNumber[${conf.remotePartyNumber}]`)
+        this.assertKeyState(KEYS.KEY_LOUDSPEAKER, 'LAMP_OFF', 'NO_COLOUR')
+        this.assertKeyState(KEYS.KEY_HEADSET, 'LAMP_OFF', 'NO_COLOUR')
+        this.assertKeyState(KEYS.LED_ALERT, 'LAMP_OFF', 'NO_COLOUR')
+        this.assertCallState('connectionCleared')
+        switch (this.#deviceType)
         {
-            await _self._keyRelease(KEYS.SOCKET_HEADSET);
-            await _self.sleep(250);
+            case DEVICE_TYPE.CP100:
+            case DEVICE_TYPE.CP110:
+            case DEVICE_TYPE.CP200:
+            case DEVICE_TYPE.CP205:
+            case DEVICE_TYPE.CP210:
+                this.assertNotification(`Ends: ${conf.remotePartyNumber}`)
+                break;
+            default:
+                this.assertToast(`Call with ${conf.remotePartyNumber} ended`)
         }
-        resolve();
-    });
-};
+    }
 
-Device.prototype.goToAdmin = function() {
-    const _self = this;
-    _self.emit('log', `goToAdmin() IP[${_self.ip}] E164[${_self.e164}]`)
-    return new Promise(async resolve => {
-        if (_self.connected === true)
-        {
-            await _self._keyPress(KEYS.COMBO_ADMIN);
-            await _self.sleep(1500);
-            await _self.dial(_self.pw);
-            await _self.ok();
-        }
-        resolve();
-    });
-};
+    sleep (time) {
+        this.emit('log', `sleep() IP[${this.#ip}] E164[${this.#e164}] time[${time}]`)
+        return new Promise(resolve => {
+            setTimeout(() => {
+                resolve();
+            }, time)
+        });
+    };
 
-Device.prototype.getCodec = function() {
-    const _self = this;
-    _self.emit('log', `getCodec() IP[${_self.ip}] E164[${_self.e164}]`);
-    return new Promise(async resolve => {
-        const res = await _self._sendGetCodecRequest();
-        const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
-        let txCodec = 'Unknown';
-        if (data && REG_EX.CODEC.test(data))
-        {
-            const codec = data.replace(REG_EX.CODEC, '');
-            if (Object.keys(CODECS).indexOf(codec) >= 0)
+    shutdown () {
+        this.emit('log', `shutdown() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#client && this.#connected === true)
             {
-                txCodec = CODECS[codec];
+                this.#connected = false;
+                await this.hookOff();
+                await this.hookOn();
+                await this.#shutdownStateIndication();
+                this.#client.destroy();
             }
-        }
-        resolve(txCodec);
-    });
-}
+            resolve();
+        });
+    }
 
-Device.prototype.testSpeechPathTo = function(userProvided) {
-    const _self = this;
-    const conf = _self._getConfWithDefaults(userProvided, { otherDevice: null, length: 5000, minQuality: 3 });
-    if (conf.otherDevice === null || conf.otherDevice instanceof Device === false)
-    {
-        _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice must be provided`)
-        return;
+    hookOff () {
+        this.emit('log', `hookOff() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(resolve => {
+            const hookData = Buffer.from([0x01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_OFF])
+            const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
+            this.#sendMessage(this.#getTIMessage(data, resolve));
+        });
+    };
+
+    hookOn () {
+        this.emit('log', `hookOn() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(resolve => {
+            const hookData = Buffer.from([0x01, KEYS.KEY_HOOKSWITCH, KEYS.EVT_HOOK_ON])
+            const data = `${DEFS.TM_PUSHKEY_W_REQ}${DEFS.TM_APP_SYSTEMTEST}${DEFS.TM_INIT_NULL}${hookData.length.toString().padStart(2, '0')}${hookData.toString('hex')}`
+            this.#sendMessage(this.#getTIMessage(data, resolve));
+        });
+    };
+
+    dial (keys) {
+        this.emit('log', `dial() IP[${this.#ip}] E164[${this.#e164}] keys[${keys}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                for (let i = 0; i < keys.length; i++)
+                {
+                    await this.normalKeyPress(NUMPAD[keys[i]]);
+                }
+            }
+            resolve();
+        });
+    };
+
+    write (text) {
+        this.emit('log', `write() IP[${this.#ip}] E164[${this.#e164}] text[${text}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                for (let i = 0; i < text.length; i++)
+                {
+                    const char_normal = text[i]
+                    const char_ascii  = Buffer.from(text[i].toLowerCase(), 'utf8').toString('hex')
+                    if (this.#isNumber(char_normal) === true)
+                    {
+                        await this.#setInputMode('123')
+                        await this.dial(char_normal)
+                    }
+                    else if (this.#isSpecial(char_ascii) === true)
+                    {
+                        await this.#setInputMode('abc')
+                        await this.dial(CHAR_SPECIAL[char_ascii])
+                    }
+                    else if (this.#isLetter(char_ascii) === true)
+                    {
+                        if (char_normal == char_normal.toUpperCase()) {
+                            await this.#setInputMode('Abc')
+                            await this.dial(CHAR[char_ascii])
+                        } else {
+                            await this.#setInputMode('abc')
+                            await this.dial(CHAR[char_ascii])
+                        }
+                    }
+                    await this.sleep(500)
+                }
+            }
+            resolve();
+        });
+    };
+
+    longKeyPress (key) {
+        this.emit('log', `longKeyPress() IP[${this.#ip}] E164[${this.#e164}] key[${key}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(key);
+                await this.sleep(2000);
+                await this.#keyRelease(key);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    normalKeyPress (key) {
+        this.emit('log', `normalKeyPress() IP[${this.#ip}] E164[${this.#e164}] key[${key}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(key);
+                await this.sleep(500);
+                await this.#keyRelease(key);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    scrollUntil (target) {
+        const targets = Array.isArray(target) ? target : [target]
+        this.emit('log', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] targets[${JSON.stringify(targets)}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.longKeyPress(KEYS.KEY_NAVI_UP);
+                let currentSelected = lastselected = this.#selectedItem;
+                do {
+                    if (targets.filter(elem => currentSelected.match(elem)).length > 0) return resolve(true);
+                    lastSelected = currentSelected;
+                    await this.down();
+                    currentSelected = this.#selectedItem;
+                    this.emit('log', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] targets[${JSON.stringify(targets)}]`)
+                    if (lastSelected == currentSelected)
+                    {
+                        this.emit('error', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] targets[${JSON.stringify(targets)}]`)
+                        return resolve(false);
+                    }
+                } while(true)
+            } else {
+                resolve(false);
+            }
+        });
+    };
+
+    ok () {
+        this.emit('log', `ok() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.KEY_NAVI_OK);
+                await this.sleep(500);
+                await this.#keyRelease(KEYS.KEY_NAVI_OK);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    up () {
+        this.emit('log', `up() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.KEY_NAVI_UP);
+                await this.sleep(500);
+                await this.#keyRelease(KEYS.KEY_NAVI_UP);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    down () {
+        this.emit('log', `down() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.KEY_NAVI_DOWN);
+                await this.sleep(500);
+                await this.#keyRelease(KEYS.KEY_NAVI_DOWN);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    left () {
+        this.emit('log', `left() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.KEY_NAVI_LEFT);
+                await this.sleep(500);
+                await this.#keyRelease(KEYS.KEY_NAVI_LEFT);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    right () {
+        this.emit('log', `right() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.KEY_NAVI_RIGHT);
+                await this.sleep(500);
+                await this.#keyRelease(KEYS.KEY_NAVI_RIGHT);
+                await this.sleep(500);
+            }
+            resolve();
+        });
+    };
+
+    restart () {
+        this.emit('log', `restart() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.COMBO_RESTART);
+                await this.sleep(1500);
+                await this.dial(this.#pw);
+                await this.ok();
+                this.#client.destroy();
+            }
+            resolve();
+        });
+    };
+
+    factoryReset () {
+        this.emit('log', `factoryReset() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.COMBO_RESET);
+                await this.sleep(1500);
+                await this.dial('124816');
+                await this.ok();
+                this.#client.destroy();
+            }
+            resolve();
+        });
+    };
+
+    fakeHeadsetConnected () {
+        this.emit('log', `fakeHeadsetConnected() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.SOCKET_HEADSET);
+                await this.sleep(250);
+            }
+            resolve();
+        });
+    };
+
+    fakeHeadsetDisconnected () {
+        this.emit('log', `fakeHeadsetDisconnected() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyRelease(KEYS.SOCKET_HEADSET);
+                await this.sleep(250);
+            }
+            resolve();
+        });
+    };
+
+    goToAdmin () {
+        this.emit('log', `goToAdmin() IP[${this.#ip}] E164[${this.#e164}]`)
+        return new Promise(async resolve => {
+            if (this.#connected === true)
+            {
+                await this.#keyPress(KEYS.COMBO_ADMIN);
+                await this.sleep(1500);
+                await this.dial(this.#pw);
+                await this.ok();
+            }
+            resolve();
+        });
+    };
+
+    getCodec () {
+        this.emit('log', `getCodec() IP[${this.#ip}] E164[${this.#e164}]`);
+        return new Promise(async resolve => {
+            const res = await this.#sendGetCodecRequest();
+            const data = REG_EX.XML_DATA_VALUE.test(res) ? REG_EX.XML_DATA_VALUE.exec(res)[1] : '';
+            let txCodec = 'Unknown';
+            if (data && REG_EX.CODEC.test(data))
+            {
+                const codec = data.replace(REG_EX.CODEC, '');
+                if (Object.keys(CODECS).indexOf(codec) >= 0)
+                {
+                    txCodec = CODECS[codec];
+                }
+            }
+            resolve(txCodec);
+        });
     }
-    if (_self.fullAccess === false)
-    {
-        _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] dongle must be installed to run speech path test`)
-        return;
-    }
-    _self.emit('log', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] otherDevice[${conf.otherDevice.getPhoneNumber()}]`);
-    return new Promise(async resolve => {
-        await _self._startSpeechTestTransmit();
-        await conf.otherDevice._startSpeechTestReceive();
-        await _self.sleep(conf.length);
-        await conf.otherDevice._stopSpeechTestReceive();
-        await _self._stopSpeechTestTransmit();
-        const result = await conf.otherDevice._getSpeechTestResults();
-        if (result.VQT < conf.minQuality)
+
+    testSpeechPathTo (userProvided) {
+        const conf = this.#getConfWithDefaults(userProvided, { otherDevice: null, length: 5000, minQuality: 3 });
+        if (conf.otherDevice === null || conf.otherDevice instanceof Device === false)
         {
-            _self.emit('error', `testSpeechPathTo() IP[${_self.ip}] E164[${_self.e164}] minQuality[${conf.minQuality}] VQT[${result.VQT}]`);
+            this.emit('error', `testSpeechPathTo() IP[${this.#ip}] E164[${this.#e164}] otherDevice must be provided`)
+            return;
         }
-        resolve();
-    });
+        if (this.#fullAccess !== true)
+        {
+            this.emit('error', `testSpeechPathTo() IP[${this.#ip}] E164[${this.#e164}] dongle must be installed to run speech path test`)
+            return;
+        }
+        this.emit('log', `testSpeechPathTo() IP[${this.#ip}] E164[${this.#e164}] otherDevice[${conf.otherDevice.getPhoneNumber()}]`);
+        return new Promise(async resolve => {
+            await this.#startSpeechTestTransmit();
+            await conf.otherDevice.#startSpeechTestReceive();
+            await this.sleep(conf.length);
+            await conf.otherDevice.#stopSpeechTestReceive();
+            await this.#stopSpeechTestTransmit();
+            const result = await conf.otherDevice.getSpeechTestResults();
+            if (result.VQT < conf.minQuality)
+            {
+                this.emit('error', `testSpeechPathTo() IP[${this.#ip}] E164[${this.#e164}] minQuality[${conf.minQuality}] VQT[${result.VQT}]`);
+            }
+            resolve();
+        });
+    }
 }
 
 module.exports = {
