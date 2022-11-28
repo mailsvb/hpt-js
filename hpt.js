@@ -1470,7 +1470,8 @@ class Device extends EventEmitter {
             if (this.#connected === true)
             {
                 await this.longKeyPress(KEYS.KEY_NAVI_UP);
-                let currentSelected = lastselected = this.#selectedItem;
+                let currentSelected = this.#selectedItem;
+                let lastSelected = this.#selectedItem;
                 do {
                     if (targets.filter(elem => currentSelected.match(elem)).length > 0) return resolve(true);
                     lastSelected = currentSelected;
@@ -1479,7 +1480,7 @@ class Device extends EventEmitter {
                     this.emit('log', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] currentSelected[${currentSelected}] lastSelected[${lastSelected}] targets[${JSON.stringify(targets)}]`)
                     if (lastSelected == currentSelected)
                     {
-                        this.emit('error', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] currentSelected[${currentSelected}] lastselected[${lastselected}] targets[${JSON.stringify(targets)}]`)
+                        this.emit('error', `scrollUntil() IP[${this.#ip}] E164[${this.#e164}] currentSelected[${currentSelected}] lastselected[${lastSelected}] targets[${JSON.stringify(targets)}]`)
                         return resolve(false);
                     }
                 } while(true)
