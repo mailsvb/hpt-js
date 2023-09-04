@@ -902,7 +902,7 @@ class Device extends EventEmitter {
         });
     }
 
-    #startSpeechTestTransmit () {
+    startSpeechTestTransmit () {
         this.emit('log', `startSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
             const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_TM_START, 0, 0);
@@ -915,7 +915,7 @@ class Device extends EventEmitter {
         });
     }
 
-    #stopSpeechTestTransmit () {
+    stopSpeechTestTransmit () {
         this.emit('log', `stopSpeechTestTransmit() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
             const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_TM_STOP, 0, 0);
@@ -928,7 +928,7 @@ class Device extends EventEmitter {
         });
     }
 
-    #startSpeechTestReceive () {
+    startSpeechTestReceive () {
         this.emit('log', `startSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
             const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_START, speechTestLength, 0);
@@ -941,7 +941,7 @@ class Device extends EventEmitter {
         });
     }
 
-    #stopSpeechTestReceive () {
+    stopSpeechTestReceive () {
         this.emit('log', `stopSpeechTestReceive() IP[${this.#ip}] E164[${this.#e164}]`);
         return new Promise(async resolve => {
             const res = await this.#sendSpeechTestRequest(DEFS.SPEECHTEST_RECV_STOP, 0, 0);
@@ -1660,11 +1660,11 @@ class Device extends EventEmitter {
         }
         this.emit('log', `testSpeechPathTo() IP[${this.#ip}] E164[${this.#e164}] otherDevice[${conf.otherDevice.getPhoneNumber()}]`);
         return new Promise(async resolve => {
-            await this.#startSpeechTestTransmit();
-            await conf.otherDevice.#startSpeechTestReceive();
+            await this.startSpeechTestTransmit();
+            await conf.otherDevice.startSpeechTestReceive();
             await this.sleep(conf.length);
-            await conf.otherDevice.#stopSpeechTestReceive();
-            await this.#stopSpeechTestTransmit();
+            await conf.otherDevice.stopSpeechTestReceive();
+            await this.stopSpeechTestTransmit();
             const result = await conf.otherDevice.getSpeechTestResults();
             if (result.VQT < conf.minQuality)
             {
